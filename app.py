@@ -1,20 +1,61 @@
 from flask import Flask, request, jsonify, render_template_string
 from twilio.rest import Client
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import os
+import urllib.request
+import urllib.parse
+import json
 
 app = Flask(__name__)
 
 # ---------------- CONFIG ----------------
-TWILIO_SID    = "ACb053c150e0efb5890ad3ff32c4686df8"
-TWILIO_AUTH   = "18c80cbe5108877d636e1e3d2c8e4b23"
-TWILIO_NUMBER = "+18457738393"
-EMAIL_ADDRESS  = "nexus.srmist@gmail.com"
-EMAIL_PASSWORD = "bnon rrkt rndh ahid"
+# Store these as Environment Variables in Render dashboard, NOT hardcoded.
+# Go to Render → Your Service → Environment → Add the keys below.
+TWILIO_SID    = os.environ.get("TWILIO_SID",    "ACb053c150e0efb5890ad3ff32c4686df8")
+TWILIO_AUTH   = os.environ.get("TWILIO_AUTH",   "18c80cbe5108877d636e1e3d2c8e4b23")
+TWILIO_NUMBER = os.environ.get("TWILIO_NUMBER", "+18457738393")
+SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")   # <-- set this in Render env vars
+EMAIL_ADDRESS    = os.environ.get("EMAIL_ADDRESS", "nexus.srmist@gmail.com")
 
-client = Client(TWILIO_SID, TWILIO_AUTH)
+# NOTE: smtplib (port 465/587) is blocked on Render free tier.
+# This app now uses SendGrid HTTP API instead — works on all plans.
+# Sign up free at https://sendgrid.com → Settings → API Keys → create one
+# Then add it as SENDGRID_API_KEY in Render environment variables.
+
+try:
+    twilio_client = Client(TWILIO_SID, TWILIO_AUTH)
+except Exception:
+    twilio_client = None
+
 live_location = {}
+
+# ---------------- EMAIL via SendGrid HTTP API ----------------
+def send_email_sendgrid(to_email, subject, html_body, plain_body):
+    """Send email via SendGrid REST API (works on Render free tier)."""
+    if not SENDGRID_API_KEY:
+        raise Exception("SENDGRID_API_KEY not set. Add it in Render → Environment.")
+
+    payload = json.dumps({
+        "personalizations": [{"to": [{"email": to_email}]}],
+        "from": {"email": EMAIL_ADDRESS},
+        "subject": subject,
+        "content": [
+            {"type": "text/plain", "value": plain_body},
+            {"type": "text/html",  "value": html_body},
+        ],
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        "https://api.sendgrid.com/v3/mail/send",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {SENDGRID_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        if resp.status not in (200, 202):
+            raise Exception(f"SendGrid returned HTTP {resp.status}")
 
 # ---------------- UI ----------------
 HTML = """<!DOCTYPE html>
@@ -91,68 +132,25 @@ body{min-height:100%;font-family:'Plus Jakarta Sans',sans-serif;background:var(-
 .btn-save{width:100%;margin-top:4px;background:linear-gradient(135deg,rgba(155,109,255,.18),rgba(155,109,255,.08));border:1.5px solid rgba(155,109,255,.3);border-radius:13px;color:var(--violet);font-family:'Plus Jakarta Sans',sans-serif;font-weight:700;font-size:13px;padding:13px;cursor:pointer;letter-spacing:.4px;display:flex;align-items:center;justify-content:center;gap:7px;transition:background .15s,transform .1s}
 .btn-save:active{transform:scale(.98)}
 
-/* ═══════════════════════════════
-   CONTACTS  ← main feature
-═══════════════════════════════ */
+/* CONTACTS */
 .contacts-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
 .contacts-title{font-size:15px;font-weight:800}
 .contacts-badge{font-size:11px;font-weight:700;letter-spacing:.5px;background:var(--violetg);border:1px solid rgba(155,109,255,.25);color:var(--violet);border-radius:20px;padding:3px 10px}
-
-/* contact list */
 #contact-list{display:flex;flex-direction:column;gap:10px;margin-bottom:14px}
-
 .no-c{text-align:center;padding:22px 0 6px;color:var(--sub);font-size:13px;font-weight:500;line-height:1.9}
 .no-c-ico{font-size:30px;display:block;margin-bottom:8px;opacity:.55}
-
-/* individual contact card */
-.c-item{
-  display:flex;align-items:stretch;
-  background:var(--card2);border:1.5px solid var(--border);
-  border-radius:16px;overflow:hidden;
-  animation:ci .25s ease;
-  transition:border-color .2s,transform .1s;
-}
+.c-item{display:flex;align-items:stretch;background:var(--card2);border:1.5px solid var(--border);border-radius:16px;overflow:hidden;animation:ci .25s ease;transition:border-color .2s,transform .1s}
 .c-item:active{transform:scale(.99)}
 @keyframes ci{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
-
-/* left colour accent */
 .c-accent{width:4px;flex-shrink:0}
-
-/* avatar */
-.c-av{
-  width:42px;height:42px;border-radius:12px;flex-shrink:0;
-  margin:13px 0 13px 12px;
-  display:flex;align-items:center;justify-content:center;
-  font-family:'Sora',sans-serif;font-size:18px;font-weight:800;
-  border:1.5px solid;
-}
-
-/* info section */
+.c-av{width:42px;height:42px;border-radius:12px;flex-shrink:0;margin:13px 0 13px 12px;display:flex;align-items:center;justify-content:center;font-family:'Sora',sans-serif;font-size:18px;font-weight:800;border:1.5px solid}
 .c-body{flex:1;padding:12px 10px;min-width:0}
 .c-name{font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:6px}
 .c-pills{display:flex;flex-wrap:wrap;gap:5px}
-.c-pill{
-  display:flex;align-items:center;gap:4px;
-  background:var(--bg2);border:1px solid var(--border);
-  border-radius:8px;padding:3px 8px;
-  font-size:10px;font-weight:600;color:var(--sub);
-  max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-}
-
-/* delete button */
-.c-del{
-  width:54px;flex-shrink:0;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
-  background:transparent;border:none;border-left:1px solid var(--border);
-  cursor:pointer;color:var(--sub2);
-  font-size:14px;
-  transition:background .15s,color .15s;
-  -webkit-tap-highlight-color:transparent;
-}
+.c-pill{display:flex;align-items:center;gap:4px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:3px 8px;font-size:10px;font-weight:600;color:var(--sub);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.c-del{width:54px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;background:transparent;border:none;border-left:1px solid var(--border);cursor:pointer;color:var(--sub2);font-size:14px;transition:background .15s,color .15s;-webkit-tap-highlight-color:transparent}
 .c-del-lbl{font-size:8px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:inherit}
 .c-del:active{background:rgba(255,64,96,.12);color:var(--red)}
-
-/* add button */
 .btn-add{width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:var(--redbg);border:1.5px dashed rgba(255,64,96,.35);border-radius:14px;padding:13px;color:var(--red);font-family:'Plus Jakarta Sans',sans-serif;font-weight:700;font-size:13px;letter-spacing:.3px;cursor:pointer;transition:background .15s,transform .1s}
 .btn-add:active{transform:scale(.98);background:rgba(255,64,96,.14)}
 
@@ -452,16 +450,19 @@ def update_location():
 @app.route("/sos", methods=["POST"])
 def sos():
     try:
-        data  = request.json
-        lat   = live_location.get("lat")
-        lng   = live_location.get("lng")
+        data = request.json
+        lat  = live_location.get("lat")
+        lng  = live_location.get("lng")
         if not lat or not lng:
-            return jsonify({"status": "Location not available yet. Please allow GPS."})
+            return jsonify({"status": "❌ Location not available yet. Please allow GPS and wait a moment."})
         map_url = f"https://www.google.com/maps?q={lat},{lng}"
         errors  = []
 
+        # ── SMS via Twilio ──────────────────────────────────────────────────
         if data.get("phone"):
             try:
+                if not twilio_client:
+                    raise Exception("Twilio client failed to initialise — check TWILIO_SID / TWILIO_AUTH env vars.")
                 sms_msg = (
                     f"\U0001f6a8 SOS ALERT \u2014 PROTRACTOR\n"
                     f"\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n"
@@ -472,10 +473,15 @@ def sos():
                     f"\u26a0\ufe0f  This person needs IMMEDIATE help.\n"
                     f"\U0001f4de  Call them or dial 112 now."
                 )
-                client.messages.create(body=sms_msg, from_=TWILIO_NUMBER, to=data["phone"])
+                twilio_client.messages.create(
+                    body=sms_msg,
+                    from_=TWILIO_NUMBER,
+                    to=data["phone"]
+                )
             except Exception as e:
                 errors.append(f"SMS: {e}")
 
+        # ── Email via SendGrid HTTP API (works on Render free tier) ─────────
         if data.get("email"):
             try:
                 html_body = f"""<!DOCTYPE html>
@@ -593,16 +599,9 @@ def sos():
   </table>
 </body>
 </html>"""
-                email_msg = MIMEMultipart('alternative')
-                email_msg['From']    = EMAIL_ADDRESS
-                email_msg['To']      = data["email"]
-                email_msg['Subject'] = f"\U0001f6a8 SOS Alert \u2014 {data['name']} needs help NOW"
-                email_msg.attach(MIMEText(f"SOS ALERT!\nUser: {data['name']}\nLocation: {map_url}", 'plain'))
-                email_msg.attach(MIMEText(html_body, 'html'))
-                srv = smtplib.SMTP_SSL('smtp.gmail.com', 465)
-                srv.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
-                srv.send_message(email_msg)
-                srv.quit()
+                plain_body = f"SOS ALERT!\nUser: {data['name']}\nLocation: {map_url}"
+                subject    = f"\U0001f6a8 SOS Alert \u2014 {data['name']} needs help NOW"
+                send_email_sendgrid(data["email"], subject, html_body, plain_body)
             except Exception as e:
                 errors.append(f"Email: {e}")
 
@@ -628,4 +627,5 @@ def manifest():
 
 # ---------------- START ----------------
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
