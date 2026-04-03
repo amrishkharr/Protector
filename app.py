@@ -1,56 +1,68 @@
 from flask import Flask, request, jsonify, render_template_string
 from twilio.rest import Client
-import smtplib
-import ssl
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import urllib.request
+import urllib.error
+import json
 import os
 
 app = Flask(__name__)
 
 # ============================================================
-#  CONFIG  — set these as Environment Variables in Render:
+#  CONFIG — Add ALL of these in Render → Environment Variables
 #
-#   TWILIO_SID      = ACb053c150e0efb5890ad3ff32c4686df8
-#   TWILIO_AUTH     = 18c80cbe5108877d636e1e3d2c8e4b23
-#   TWILIO_NUMBER   = +18457738393
-#   EMAIL_ADDRESS   = nexus.srmist@gmail.com
-#   EMAIL_PASSWORD  = bnon rrkt rndh ahid
-#
-#  Render → Your Service → Environment → Add Environment Variable
+#   TWILIO_SID      →  get from twilio.com/console
+#   TWILIO_AUTH     →  get from twilio.com/console
+#   TWILIO_NUMBER   →  your Twilio phone number e.g. +18457738393
+#   EMAIL_ADDRESS   →  nexus.srmist@gmail.com
+#   BREVO_API_KEY   →  get from brevo.com → SMTP & API → API Keys
 # ============================================================
-TWILIO_SID     = os.environ.get("TWILIO_SID",     "ACb053c150e0efb5890ad3ff32c4686df8")
-TWILIO_AUTH    = os.environ.get("TWILIO_AUTH",    "18c80cbe5108877d636e1e3d2c8e4b23")
-TWILIO_NUMBER  = os.environ.get("TWILIO_NUMBER",  "+18457738393")
-EMAIL_ADDRESS  = os.environ.get("EMAIL_ADDRESS",  "nexus.srmist@gmail.com")
-EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD", "bnon rrkt rndh ahid")
+TWILIO_SID    = os.environ.get("TWILIO_SID",    "")
+TWILIO_AUTH   = os.environ.get("TWILIO_AUTH",   "")
+TWILIO_NUMBER = os.environ.get("TWILIO_NUMBER", "")
+EMAIL_ADDRESS = os.environ.get("EMAIL_ADDRESS", "nexus.srmist@gmail.com")
+BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "")
 
 try:
-    twilio_client = Client(TWILIO_SID, TWILIO_AUTH)
+    twilio_client = Client(TWILIO_SID, TWILIO_AUTH) if TWILIO_SID and TWILIO_AUTH else None
 except Exception:
     twilio_client = None
 
 live_location = {}
 
-# ============================================================
-#  EMAIL  — Gmail via STARTTLS port 587
-#  Port 465 (SSL) is blocked on Render; port 587 works fine.
-# ============================================================
-def send_email_gmail(to_email, subject, html_body, plain_body):
-    msg = MIMEMultipart("alternative")
-    msg["From"]    = EMAIL_ADDRESS
-    msg["To"]      = to_email
-    msg["Subject"] = subject
-    msg.attach(MIMEText(plain_body, "plain"))
-    msg.attach(MIMEText(html_body,  "html"))
 
-    context = ssl.create_default_context()
-    with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as server:
-        server.ehlo()
-        server.starttls(context=context)
-        server.ehlo()
-        server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
-        server.sendmail(EMAIL_ADDRESS, to_email, msg.as_string())
+# ============================================================
+#  EMAIL via Brevo HTTP API — works on Render free tier
+# ============================================================
+def send_email_brevo(to_email, subject, html_body, plain_body):
+    if not BREVO_API_KEY:
+        raise Exception("BREVO_API_KEY not set in Render environment variables.")
+
+    payload = json.dumps({
+        "sender":      {"name": "Protractor SOS", "email": EMAIL_ADDRESS},
+        "to":          [{"email": to_email}],
+        "subject":     subject,
+        "htmlContent": html_body,
+        "textContent": plain_body,
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        "https://api.brevo.com/v3/smtp/email",
+        data=payload,
+        headers={
+            "api-key":      BREVO_API_KEY,
+            "Content-Type": "application/json",
+            "Accept":       "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            if resp.status not in (200, 201):
+                raise Exception(f"Brevo returned HTTP {resp.status}")
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="ignore")
+        raise Exception(f"Brevo HTTP {e.code}: {body}")
+
 
 # ============================================================
 #  UI
@@ -395,12 +407,14 @@ setTimeout(startVoice,2000);
 def home():
     return render_template_string(HTML)
 
+
 @app.route("/update_location", methods=["POST"])
 def update_location():
     data = request.json
     live_location["lat"] = data.get("lat")
     live_location["lng"] = data.get("lng")
     return jsonify({"status": "updated"})
+
 
 @app.route("/sos", methods=["POST"])
 def sos():
@@ -410,7 +424,7 @@ def sos():
         lng  = live_location.get("lng")
 
         if not lat or not lng:
-            return jsonify({"status": "❌ Location not available yet. Please allow GPS and wait a few seconds, then try again."})
+            return jsonify({"status": "❌ Location not available yet. Allow GPS and wait a few seconds, then try again."})
 
         map_url = f"https://www.google.com/maps?q={lat},{lng}"
         errors  = []
@@ -419,15 +433,15 @@ def sos():
         if data.get("phone"):
             try:
                 if not twilio_client:
-                    raise Exception("Twilio not initialised. Check TWILIO_SID and TWILIO_AUTH env vars.")
+                    raise Exception("Twilio not set up. Add TWILIO_SID, TWILIO_AUTH, TWILIO_NUMBER in Render env vars.")
                 sms_body = (
                     f"🚨 SOS ALERT — PROTRACTOR\n"
-                    f"────────────────────────\n"
+                    f"{'─'*24}\n"
                     f"👤 Person : {data['name']}\n"
                     f"📍 Coords : {lat:.5f}, {lng:.5f}\n"
-                    f"🗺 Maps   : {map_url}\n"
-                    f"────────────────────────\n"
-                    f"⚠️ This person needs IMMEDIATE help.\n"
+                    f"🗺  Maps  : {map_url}\n"
+                    f"{'─'*24}\n"
+                    f"⚠️ Needs IMMEDIATE help.\n"
                     f"📞 Call them or dial 112 now."
                 )
                 twilio_client.messages.create(
@@ -438,7 +452,7 @@ def sos():
             except Exception as e:
                 errors.append(f"SMS: {e}")
 
-        # ── Email via Gmail STARTTLS port 587 ───────────────────────
+        # ── Email via Brevo HTTP API ────────────────────────────────
         if data.get("email"):
             try:
                 html_body = f"""<!DOCTYPE html>
@@ -451,23 +465,29 @@ def sos():
         <tr><td style="height:5px;background:#c8392b;border-radius:8px 8px 0 0;"></td></tr>
         <tr><td style="background:#1a1612;padding:28px 32px 22px;">
           <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-            <td><div style="font-size:22px;font-weight:900;color:#f5f0e8;">Protractor<span style="color:#c8392b;">.</span></div>
-                <div style="font-size:10px;letter-spacing:3px;text-transform:uppercase;color:#8a8070;margin-top:3px;">Personal Safety Guard</div></td>
+            <td>
+              <div style="font-size:22px;font-weight:900;color:#f5f0e8;">Protractor<span style="color:#c8392b;">.</span></div>
+              <div style="font-size:10px;letter-spacing:3px;text-transform:uppercase;color:#8a8070;margin-top:3px;">Personal Safety Guard</div>
+            </td>
             <td align="right"><div style="background:#c8392b;border-radius:50%;width:44px;height:44px;text-align:center;line-height:44px;font-size:22px;">&#128737;</div></td>
           </tr></table>
         </td></tr>
         <tr><td style="background:#c8392b;padding:20px 32px;">
           <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-            <td><div style="font-size:11px;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,.65);margin-bottom:6px;">Emergency Alert</div>
-                <div style="font-size:26px;font-weight:900;color:#fff;line-height:1.1;">&#128680; SOS Triggered</div></td>
-            <td align="right" style="vertical-align:top;"><div style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);border-radius:20px;padding:5px 12px;font-size:11px;font-weight:600;color:white;white-space:nowrap;">URGENT</div></td>
+            <td>
+              <div style="font-size:11px;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,.65);margin-bottom:6px;">Emergency Alert</div>
+              <div style="font-size:26px;font-weight:900;color:#fff;line-height:1.1;">&#128680; SOS Triggered</div>
+            </td>
+            <td align="right" style="vertical-align:top;">
+              <div style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);border-radius:20px;padding:5px 12px;font-size:11px;font-weight:600;color:white;white-space:nowrap;">URGENT</div>
+            </td>
           </tr></table>
         </td></tr>
         <tr><td style="background:#ffffff;padding:28px 32px;">
           <p style="margin:0 0 20px;font-size:14px;color:#5a5248;line-height:1.7;">
             <strong style="color:#1a1612;">{data['name']}</strong> has triggered an emergency SOS alert via Protractor. Please respond immediately or contact emergency services.
           </p>
-          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:20px;">
+          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:16px;">
             <tr><td style="padding-bottom:10px;">
               <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#fdecea;border:1px solid #f0c4bf;border-radius:12px;padding:14px 16px;"><tr>
                 <td style="font-size:18px;width:36px;vertical-align:middle;">&#128100;</td>
@@ -494,8 +514,8 @@ def sos():
               </a>
             </td></tr>
           </table>
-          <hr style="border:none;border-top:1px solid #ece6d9;margin:0 0 20px;">
-          <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#8a8070;font-weight:600;margin-bottom:12px;">Recommended Actions</div>
+          <hr style="border:none;border-top:1px solid #ece6d9;margin:0 0 16px;">
+          <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#8a8070;font-weight:600;margin-bottom:10px;">Recommended Actions</div>
           <table width="100%" cellpadding="0" cellspacing="0" border="0">
             <tr><td style="padding-bottom:8px;font-size:13px;color:#2e2820;line-height:1.5;">&#128222; Call <strong>{data['name']}</strong> immediately to check their status</td></tr>
             <tr><td style="padding-bottom:8px;font-size:13px;color:#2e2820;line-height:1.5;">&#128506; Use the location link above to find their exact position</td></tr>
@@ -518,7 +538,7 @@ def sos():
                     f"This person needs immediate help. Call them or dial 112."
                 )
                 subject = f"🚨 SOS Alert — {data['name']} needs help NOW"
-                send_email_gmail(data["email"], subject, html_body, plain_body)
+                send_email_brevo(data["email"], subject, html_body, plain_body)
             except Exception as e:
                 errors.append(f"Email: {e}")
 
