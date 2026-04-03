@@ -16,9 +16,9 @@ app = Flask(__name__)
 #   EMAIL_ADDRESS   →  nexus.srmist@gmail.com
 #   BREVO_API_KEY   →  from brevo.com → SMTP & API → API Keys
 # ============================================================
-TWILIO_SID    = os.environ.get("TWILIO_SID",    "ACb053c150e0efb5890ad3ff32c4686df8")
-TWILIO_AUTH   = os.environ.get("TWILIO_AUTH",   "0434090f0def5b3903bed6c9bbbe4a76")
-TWILIO_NUMBER = os.environ.get("TWILIO_NUMBER", "+18457738393")
+TWILIO_SID    = os.environ.get("TWILIO_SID",    "AC898603a23a41af045d16c37018f529dd")
+TWILIO_AUTH   = os.environ.get("TWILIO_AUTH",   "cfda345c1a464abfb4a592cea2472be4")
+TWILIO_NUMBER = os.environ.get("TWILIO_NUMBER", "+16623747889")
 EMAIL_ADDRESS = os.environ.get("EMAIL_ADDRESS", "nexus.srmist@gmail.com")
 BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "bsks2SA9RvtkmrA")
 
