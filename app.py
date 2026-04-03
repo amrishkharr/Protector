@@ -20,7 +20,7 @@ TWILIO_SID    = os.environ.get("TWILIO_SID",    "ACb053c150e0efb5890ad3ff32c4686
 TWILIO_AUTH   = os.environ.get("TWILIO_AUTH",   "18c80cbe5108877d636e1e3d2c8e4b23")
 TWILIO_NUMBER = os.environ.get("TWILIO_NUMBER", "+18457738393")
 EMAIL_ADDRESS = os.environ.get("EMAIL_ADDRESS", "nexus.srmist@gmail.com")
-BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "")
+BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "xsmtpsib-7a6ffdc9375200850c5956db3a39956a6c87b57981a9d7e5efef0f2fde92581e-FF8w9ohZ5SFxaWfX")
 
 try:
     twilio_client = Client(TWILIO_SID, TWILIO_AUTH) if TWILIO_SID and TWILIO_AUTH else None
@@ -409,15 +409,18 @@ function addContact() {
 }
 
 /* ── GPS ── */
+var lastLat = null, lastLng = null;
 navigator.geolocation.watchPosition(
   function(pos) {
+    lastLat = pos.coords.latitude;
+    lastLng = pos.coords.longitude;
     fetch('/update_location', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({lat: pos.coords.latitude, lng: pos.coords.longitude})
+      body: JSON.stringify({lat: lastLat, lng: lastLng})
     });
-    marker.setLatLng([pos.coords.latitude, pos.coords.longitude]);
-    map.setView([pos.coords.latitude, pos.coords.longitude], 15);
+    marker.setLatLng([lastLat, lastLng]);
+    map.setView([lastLat, lastLng], 15);
     var s = document.getElementById('gps-status'); s.textContent = 'ON'; s.className = 'chip-v on';
   },
   function() {
@@ -438,7 +441,7 @@ function sendSOS() {
     fetch('/sos', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name: uname, phone: c.phone || '', email: c.email || ''})
+      body: JSON.stringify({name: uname, phone: c.phone || '', email: c.email || '', lat: lastLat, lng: lastLng})
     })
     .then(function(r) { return r.json(); })
     .then(function(d) {
@@ -511,8 +514,8 @@ def update_location():
 def sos():
     try:
         data   = request.json
-        lat    = live_location.get("lat")
-        lng    = live_location.get("lng")
+        lat    = data.get("lat") or live_location.get("lat")
+        lng    = data.get("lng") or live_location.get("lng")
 
         if not lat or not lng:
             return jsonify({"status": "❌ Location not available yet. Allow GPS and wait a few seconds."})
