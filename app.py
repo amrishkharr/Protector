@@ -17,19 +17,24 @@ app = Flask(__name__)
 #
 #   SMTP_HOST       →  smtp.gmail.com  (or smtp-mail.outlook.com etc.)
 #   SMTP_PORT       →  587
-#   SMTP_USER       →  your-email@gmail.com
+#   SMTP_USER       →  your-email@gmail.comsssss
 #   SMTP_PASS       →  Gmail App Password (16 chars, NOT your login password)
 #                      myaccount.google.com → Security → App passwords
 # ============================================================
-TWILIO_SID    = os.environ.get("TWILIO_SID",    "")
-TWILIO_AUTH   = os.environ.get("TWILIO_AUTH",   "")
-TWILIO_NUMBER = os.environ.get("TWILIO_NUMBER", "")
+# ==============================
+# LOCAL CONFIG (for testing)
+# ==============================
 
-SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
-SMTP_USER = os.environ.get("SMTP_USER", "")
-SMTP_PASS = os.environ.get("SMTP_PASS", "")
+# --- Twilio ---
+TWILIO_SID    = "AC898603a23a41af045d16c37018f529dd"
+TWILIO_AUTH   = "91e25e2e4ef74801d7b27e148a08ff41"
+TWILIO_NUMBER = "+16623747889"
 
+# --- SMTP (Gmail) ---
+SMTP_HOST = "smtp.gmail.com"
+SMTP_PORT = 587
+SMTP_USER = "protectorhelp.app@gmail.com"
+SMTP_PASS = "qfjd lbnz chgu lxdg"
 try:
     twilio_client = Client(TWILIO_SID, TWILIO_AUTH) if TWILIO_SID and TWILIO_AUTH else None
 except Exception:
