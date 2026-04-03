@@ -28,6 +28,7 @@ except Exception:
     twilio_client = None
 
 live_location = {}
+saved_contacts = []   # server-side contact store
 
 
 # ============================================================
@@ -343,18 +344,19 @@ function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-/* Save/load contacts via cookie (works on Render & all browsers) */
+/* Save/load contacts via server — most reliable on Render */
 function saveContacts() {
-  try {
-    document.cookie = 'prot_contacts=' + encodeURIComponent(JSON.stringify(contacts)) + '; path=/; max-age=31536000';
-  } catch(e) {}
+  fetch('/save_contacts', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({contacts: contacts})
+  }).catch(function() {});
 }
 function loadContacts() {
-  try {
-    var raw = getCookie('prot_contacts');
-    contacts = raw ? JSON.parse(raw) : [];
-  } catch(e) { contacts = []; }
-  renderContacts();
+  fetch('/get_contacts')
+    .then(function(r) { return r.json(); })
+    .then(function(d) { contacts = d.contacts || []; renderContacts(); })
+    .catch(function() { contacts = []; renderContacts(); });
 }
 
 function renderContacts() {
@@ -441,7 +443,7 @@ function sendSOS() {
     fetch('/sos', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name: uname, phone: c.phone || '', email: c.email || '', lat: lastLat, lng: lastLng})
+      body: JSON.stringify({name: uname, phone: c.phone || '', email: c.email || '', lat: lastLat, lng: lastLng, contacts: contacts})
     })
     .then(function(r) { return r.json(); })
     .then(function(d) {
@@ -502,6 +504,18 @@ def home():
     return Response(HTML, mimetype="text/html")
 
 
+@app.route("/get_contacts", methods=["GET"])
+def get_contacts():
+    return jsonify({"contacts": saved_contacts})
+
+
+@app.route("/save_contacts", methods=["POST"])
+def save_contacts():
+    global saved_contacts
+    saved_contacts = request.json.get("contacts", [])
+    return jsonify({"status": "saved"})
+
+
 @app.route("/update_location", methods=["POST"])
 def update_location():
     data = request.json
@@ -516,6 +530,11 @@ def sos():
         data   = request.json
         lat    = data.get("lat") or live_location.get("lat")
         lng    = data.get("lng") or live_location.get("lng")
+
+        # If frontend didn't send contacts, fall back to server-stored ones
+        req_contacts = data.get("contacts")
+        if not req_contacts:
+            req_contacts = saved_contacts
 
         if not lat or not lng:
             return jsonify({"status": "❌ Location not available yet. Allow GPS and wait a few seconds."})
