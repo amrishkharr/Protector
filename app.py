@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, Response
 from twilio.rest import Client
 import urllib.request
 import urllib.error
@@ -8,16 +8,16 @@ import os
 app = Flask(__name__)
 
 # ============================================================
-#  CONFIG — Add ALL of these in Render → Environment Variables
+#  CONFIG — Set these as Environment Variables (e.g. on Render)
 #
-#   TWILIO_SID      →  get from twilio.com/console
-#   TWILIO_AUTH     →  get from twilio.com/console
-#   TWILIO_NUMBER   →  your Twilio phone number e.g. +18457738393
+#   TWILIO_SID      →  from twilio.com/console
+#   TWILIO_AUTH     →  from twilio.com/console
+#   TWILIO_NUMBER   →  your Twilio number e.g. +18457738393
 #   EMAIL_ADDRESS   →  nexus.srmist@gmail.com
-#   BREVO_API_KEY   →  get from brevo.com → SMTP & API → API Keys
+#   BREVO_API_KEY   →  from brevo.com → SMTP & API → API Keys
 # ============================================================
 TWILIO_SID    = os.environ.get("TWILIO_SID",    "ACb053c150e0efb5890ad3ff32c4686df8")
-TWILIO_AUTH   = os.environ.get("TWILIO_AUTH",   "fb007c793be21d607121756b57d731b6")
+TWILIO_AUTH   = os.environ.get("TWILIO_AUTH",   "18c80cbe5108877d636e1e3d2c8e4b23")
 TWILIO_NUMBER = os.environ.get("TWILIO_NUMBER", "+18457738393")
 EMAIL_ADDRESS = os.environ.get("EMAIL_ADDRESS", "nexus.srmist@gmail.com")
 BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "")
@@ -32,10 +32,11 @@ live_location = {}
 
 # ============================================================
 #  EMAIL via Brevo HTTP API — works on Render free tier
+#  (replaces smtplib which is blocked on Render)
 # ============================================================
 def send_email_brevo(to_email, subject, html_body, plain_body):
     if not BREVO_API_KEY:
-        raise Exception("BREVO_API_KEY not set in Render environment variables.")
+        raise Exception("BREVO_API_KEY not set. Add it in Render environment variables.")
 
     payload = json.dumps({
         "sender":      {"name": "Protractor SOS", "email": EMAIL_ADDRESS},
@@ -65,7 +66,9 @@ def send_email_brevo(to_email, subject, html_body, plain_body):
 
 
 # ============================================================
-#  UI
+#  UI  — NOTE: We return this as a plain Response (not
+#  render_template_string) to avoid Jinja2 trying to parse
+#  the JavaScript curly braces and crashing with TemplateSyntaxError.
 # ============================================================
 HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -193,7 +196,7 @@ body{min-height:100%;font-family:'Plus Jakarta Sans',sans-serif;background:var(-
 
   <div class="header">
     <div class="hb">
-      <div class="logo">🔐</div>
+      <div class="logo">&#128272;</div>
       <div>
         <div class="appname">Protractor</div>
         <div class="subline">Personal Safety Guard</div>
@@ -203,10 +206,10 @@ body{min-height:100%;font-family:'Plus Jakarta Sans',sans-serif;background:var(-
   </div>
 
   <div class="chips">
-    <div class="chip"><div class="chip-ico">🛰️</div><div class="chip-v on" id="gps-status">ON</div><div class="chip-l">GPS</div></div>
-    <div class="chip"><div class="chip-ico">🎙️</div><div class="chip-v wait" id="voice-status">WAIT</div><div class="chip-l">Voice</div></div>
-    <div class="chip"><div class="chip-ico">👥</div><div class="chip-v on" id="cc-chip">0</div><div class="chip-l">Contacts</div></div>
-    <div class="chip"><div class="chip-ico">🚀</div><div class="chip-v on">READY</div><div class="chip-l">Alert</div></div>
+    <div class="chip"><div class="chip-ico">&#128752;</div><div class="chip-v on" id="gps-status">ON</div><div class="chip-l">GPS</div></div>
+    <div class="chip"><div class="chip-ico">&#127908;</div><div class="chip-v wait" id="voice-status">WAIT</div><div class="chip-l">Voice</div></div>
+    <div class="chip"><div class="chip-ico">&#128101;</div><div class="chip-v on" id="cc-chip">0</div><div class="chip-l">Contacts</div></div>
+    <div class="chip"><div class="chip-ico">&#128640;</div><div class="chip-v on">READY</div><div class="chip-l">Alert</div></div>
   </div>
 
   <div class="sec"><div class="sec-line"></div><div class="sec-txt">Your Profile</div><div class="sec-line"></div></div>
@@ -217,10 +220,10 @@ body{min-height:100%;font-family:'Plus Jakarta Sans',sans-serif;background:var(-
     </div>
     <div class="field">
       <div class="field-lbl">Your Name</div>
-      <span class="fi">👤</span>
+      <span class="fi">&#128100;</span>
       <input id="name" type="text" placeholder="Enter your full name" autocomplete="name">
     </div>
-    <button class="btn-save" onclick="save()">💾&nbsp; Save Profile</button>
+    <button class="btn-save" onclick="save()">&#128190;&nbsp; Save Profile</button>
   </div>
 
   <div class="sec"><div class="sec-line"></div><div class="sec-txt">Emergency Contacts</div><div class="sec-line"></div></div>
@@ -230,19 +233,19 @@ body{min-height:100%;font-family:'Plus Jakarta Sans',sans-serif;background:var(-
       <div class="contacts-badge" id="c-badge">0 contacts</div>
     </div>
     <div id="contact-list"></div>
-    <button class="btn-add" onclick="openModal()">＋&nbsp; Add Emergency Contact</button>
+    <button class="btn-add" onclick="openModal()">&#65291;&nbsp; Add Emergency Contact</button>
   </div>
 
   <div class="sec"><div class="sec-line"></div><div class="sec-txt">Emergency Alert</div><div class="sec-line"></div></div>
   <div class="sos-wrap">
-    <div class="sos-eyebrow">Panic Button — Alerts All Contacts Instantly</div>
+    <div class="sos-eyebrow">Panic Button &mdash; Alerts All Contacts Instantly</div>
     <button class="sos-btn" onclick="sendSOS()" aria-label="SOS">
       <div class="sr sr1"></div><div class="sr sr2"></div><div class="sr sr3"></div>
-      <div class="sos-core"><div class="sos-ico">🚨</div><div class="sos-lbl">SOS</div></div>
+      <div class="sos-core"><div class="sos-ico">&#128680;</div><div class="sos-lbl">SOS</div></div>
     </button>
     <div class="sos-footer">
       <div class="sos-desc">Sends <b>SMS + Email</b> with live GPS<br>to every contact above</div>
-      <div class="sos-stat">🛡️ <span id="sos-count">0</span> contacts ready</div>
+      <div class="sos-stat">&#128737; <span id="sos-count">0</span> contacts ready</div>
     </div>
   </div>
 
@@ -250,7 +253,7 @@ body{min-height:100%;font-family:'Plus Jakarta Sans',sans-serif;background:var(-
   <div class="card">
     <div class="map-bar">
       <div class="map-title">Tracking Now</div>
-      <div class="map-pill">● LIVE</div>
+      <div class="map-pill">&#9679; LIVE</div>
     </div>
     <div id="map"></div>
   </div>
@@ -264,17 +267,17 @@ body{min-height:100%;font-family:'Plus Jakarta Sans',sans-serif;background:var(-
     <div class="sh-head">New Contact</div>
     <div class="field">
       <div class="field-lbl">Name / Label</div>
-      <span class="fi">🏷️</span>
+      <span class="fi">&#127991;</span>
       <input id="m-name" type="text" placeholder="e.g. Mom, Dad, Brother">
     </div>
     <div class="field">
       <div class="field-lbl">Phone Number</div>
-      <span class="fi">📞</span>
+      <span class="fi">&#128222;</span>
       <input id="m-phone" type="tel" placeholder="+91 XXXXX XXXXX">
     </div>
     <div class="field">
       <div class="field-lbl">Email Address</div>
-      <span class="fi">✉️</span>
+      <span class="fi">&#9993;</span>
       <input id="m-email" type="email" placeholder="email@example.com">
     </div>
     <div class="sh-actions">
@@ -287,114 +290,199 @@ body{min-height:100%;font-family:'Plus Jakarta Sans',sans-serif;background:var(-
 <div class="toast" id="toast"></div>
 
 <script>
-const map=L.map('map',{zoomControl:false,attributionControl:false}).setView([20.5937,78.9629],13);
+/* ── MAP ── */
+var map = L.map('map', {zoomControl:false, attributionControl:false}).setView([20.5937, 78.9629], 13);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-const pin=L.divIcon({className:'',html:'<div style="width:18px;height:18px;border-radius:50%;background:linear-gradient(135deg,#ff4060,#ff7a5c);border:3px solid #fff;box-shadow:0 0 0 3px rgba(255,64,96,.4),0 3px 12px rgba(0,0,0,.6)"></div>',iconSize:[18,18],iconAnchor:[9,9]});
-const marker=L.marker([0,0],{icon:pin}).addTo(map);
+var pin = L.divIcon({
+  className: '',
+  html: '<div style="width:18px;height:18px;border-radius:50%;background:linear-gradient(135deg,#ff4060,#ff7a5c);border:3px solid #fff;box-shadow:0 0 0 3px rgba(255,64,96,.4),0 3px 12px rgba(0,0,0,.6)"></div>',
+  iconSize: [18, 18], iconAnchor: [9, 9]
+});
+var marker = L.marker([0, 0], {icon: pin}).addTo(map);
 
-function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';clearTimeout(t._t);t._t=setTimeout(()=>t.style.display='none',3200)}
-
-function save(){
-  const n=document.getElementById('name').value.trim();
-  if(!n){toast('Enter your name first');return}
-  document.cookie='username='+encodeURIComponent(n)+'; path=/; max-age=31536000';
-  document.getElementById('username').textContent=n;
-  document.getElementById('p-av').textContent=n.charAt(0).toUpperCase();
-  toast('✅ Profile saved');
+/* ── TOAST ── */
+function toast(msg) {
+  var t = document.getElementById('toast');
+  t.textContent = msg; t.style.display = 'block';
+  clearTimeout(t._t); t._t = setTimeout(function() { t.style.display = 'none'; }, 3200);
 }
-function getCookie(k){const v=document.cookie.match('(^|;) ?'+k+'=([^;]*)(;|$)');return v?decodeURIComponent(v[2]):null}
-(function(){const n=getCookie('username')||'';if(n){document.getElementById('username').textContent=n;document.getElementById('name').value=n;document.getElementById('p-av').textContent=n.charAt(0).toUpperCase()}})();
 
-let contacts=[];
-const PALETTE=[
-  {bg:'rgba(255,64,96,.18)',border:'rgba(255,64,96,.3)',txt:'#ff4060',strip:'linear-gradient(to bottom,#ff4060,#ff7a5c)'},
-  {bg:'rgba(155,109,255,.18)',border:'rgba(155,109,255,.3)',txt:'#9b6dff',strip:'linear-gradient(to bottom,#9b6dff,#c084fc)'},
-  {bg:'rgba(61,232,160,.15)',border:'rgba(61,232,160,.3)',txt:'#3de8a0',strip:'linear-gradient(to bottom,#3de8a0,#22d3ee)'},
-  {bg:'rgba(255,179,71,.15)',border:'rgba(255,179,71,.3)',txt:'#ffb347',strip:'linear-gradient(to bottom,#ffb347,#ffd700)'},
-  {bg:'rgba(91,200,255,.15)',border:'rgba(91,200,255,.3)',txt:'#5bc8ff',strip:'linear-gradient(to bottom,#5bc8ff,#3b82f6)'},
+/* ── PROFILE ── */
+function save() {
+  var n = document.getElementById('name').value.trim();
+  if (!n) { toast('Enter your name first'); return; }
+  document.cookie = 'username=' + encodeURIComponent(n) + '; path=/; max-age=31536000';
+  document.getElementById('username').textContent = n;
+  document.getElementById('p-av').textContent = n.charAt(0).toUpperCase();
+  toast('Profile saved');
+}
+function getCookie(k) {
+  var v = document.cookie.match('(^|;) ?' + k + '=([^;]*)(;|$)');
+  return v ? decodeURIComponent(v[2]) : null;
+}
+(function() {
+  var n = getCookie('username') || '';
+  if (n) {
+    document.getElementById('username').textContent = n;
+    document.getElementById('name').value = n;
+    document.getElementById('p-av').textContent = n.charAt(0).toUpperCase();
+  }
+})();
+
+/* ── CONTACTS (cookie-based, no localStorage) ── */
+var contacts = [];
+var PALETTE = [
+  {bg:'rgba(255,64,96,.18)',  border:'rgba(255,64,96,.3)',  txt:'#ff4060', strip:'linear-gradient(to bottom,#ff4060,#ff7a5c)'},
+  {bg:'rgba(155,109,255,.18)',border:'rgba(155,109,255,.3)',txt:'#9b6dff', strip:'linear-gradient(to bottom,#9b6dff,#c084fc)'},
+  {bg:'rgba(61,232,160,.15)', border:'rgba(61,232,160,.3)', txt:'#3de8a0', strip:'linear-gradient(to bottom,#3de8a0,#22d3ee)'},
+  {bg:'rgba(255,179,71,.15)', border:'rgba(255,179,71,.3)', txt:'#ffb347', strip:'linear-gradient(to bottom,#ffb347,#ffd700)'},
+  {bg:'rgba(91,200,255,.15)', border:'rgba(91,200,255,.3)', txt:'#5bc8ff', strip:'linear-gradient(to bottom,#5bc8ff,#3b82f6)'},
 ];
-function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
-function loadContacts(){try{contacts=JSON.parse(localStorage.getItem('protractor_contacts')||'[]')}catch{contacts=[]}renderContacts()}
-function saveContacts(){localStorage.setItem('protractor_contacts',JSON.stringify(contacts))}
-function renderContacts(){
-  const n=contacts.length;
-  document.getElementById('c-badge').textContent=n+' contact'+(n!==1?'s':'');
-  document.getElementById('cc-chip').textContent=n;
-  document.getElementById('sos-count').textContent=n;
-  const list=document.getElementById('contact-list');
-  if(!n){list.innerHTML='<div class="no-c"><span class="no-c-ico">🤝</span>No contacts added yet.<br>Add people who should be<br>alerted in an emergency.</div>';return}
-  list.innerHTML=contacts.map((c,i)=>{
-    const p=PALETTE[i%PALETTE.length];
-    const init=(c.name||'?').charAt(0).toUpperCase();
-    const ph=c.phone?`<div class="c-pill"><span>📞</span>${esc(c.phone)}</div>`:'';
-    const em=c.email?`<div class="c-pill"><span>✉️</span>${esc(c.email)}</div>`:'';
-    return `<div class="c-item">
-      <div class="c-accent" style="background:${p.strip}"></div>
-      <div class="c-av" style="background:${p.bg};border-color:${p.border};color:${p.txt}">${init}</div>
-      <div class="c-body"><div class="c-name">${esc(c.name)}</div><div class="c-pills">${ph}${em}</div></div>
-      <button class="c-del" onclick="removeContact(${i})" aria-label="Remove"><span>✕</span><span class="c-del-lbl">Remove</span></button>
-    </div>`;
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* Save/load contacts via cookie (works on Render & all browsers) */
+function saveContacts() {
+  try {
+    document.cookie = 'prot_contacts=' + encodeURIComponent(JSON.stringify(contacts)) + '; path=/; max-age=31536000';
+  } catch(e) {}
+}
+function loadContacts() {
+  try {
+    var raw = getCookie('prot_contacts');
+    contacts = raw ? JSON.parse(raw) : [];
+  } catch(e) { contacts = []; }
+  renderContacts();
+}
+
+function renderContacts() {
+  var n = contacts.length;
+  document.getElementById('c-badge').textContent = n + ' contact' + (n !== 1 ? 's' : '');
+  document.getElementById('cc-chip').textContent = n;
+  document.getElementById('sos-count').textContent = n;
+  var list = document.getElementById('contact-list');
+  if (!n) {
+    list.innerHTML = '<div class="no-c"><span class="no-c-ico">&#129309;</span>No contacts added yet.<br>Add people who should be<br>alerted in an emergency.</div>';
+    return;
+  }
+  list.innerHTML = contacts.map(function(c, i) {
+    var p = PALETTE[i % PALETTE.length];
+    var init = (c.name || '?').charAt(0).toUpperCase();
+    var ph = c.phone ? '<div class="c-pill"><span>&#128222;</span>' + esc(c.phone) + '</div>' : '';
+    var em = c.email ? '<div class="c-pill"><span>&#9993;</span>' + esc(c.email) + '</div>' : '';
+    return '<div class="c-item">'
+      + '<div class="c-accent" style="background:' + p.strip + '"></div>'
+      + '<div class="c-av" style="background:' + p.bg + ';border-color:' + p.border + ';color:' + p.txt + '">' + init + '</div>'
+      + '<div class="c-body"><div class="c-name">' + esc(c.name) + '</div><div class="c-pills">' + ph + em + '</div></div>'
+      + '<button class="c-del" onclick="removeContact(' + i + ')" aria-label="Remove"><span>&#10005;</span><span class="c-del-lbl">Remove</span></button>'
+      + '</div>';
   }).join('');
 }
-function removeContact(i){const nm=contacts[i].name;contacts.splice(i,1);saveContacts();renderContacts();toast('🗑 '+nm+' removed')}
-function openModal(){document.getElementById('modal').classList.add('open');setTimeout(()=>document.getElementById('m-name').focus(),340)}
-function closeModal(){document.getElementById('modal').classList.remove('open');['m-name','m-phone','m-email'].forEach(id=>document.getElementById(id).value='')}
-function closeOnBackdrop(e){if(e.target===document.getElementById('modal'))closeModal()}
-function addContact(){
-  const n=document.getElementById('m-name').value.trim();
-  const p=document.getElementById('m-phone').value.trim();
-  const e=document.getElementById('m-email').value.trim();
-  if(!n){toast('Enter a name');return}
-  if(!p&&!e){toast('Add phone or email');return}
-  contacts.push({name:n,phone:p,email:e});saveContacts();renderContacts();closeModal();toast('✓ '+n+' added');
+
+function removeContact(i) {
+  var nm = contacts[i].name;
+  contacts.splice(i, 1);
+  saveContacts(); renderContacts();
+  toast('Removed ' + nm);
+}
+function openModal() {
+  document.getElementById('modal').classList.add('open');
+  setTimeout(function() { document.getElementById('m-name').focus(); }, 340);
+}
+function closeModal() {
+  document.getElementById('modal').classList.remove('open');
+  ['m-name','m-phone','m-email'].forEach(function(id) { document.getElementById(id).value = ''; });
+}
+function closeOnBackdrop(e) { if (e.target === document.getElementById('modal')) closeModal(); }
+
+function addContact() {
+  var n = document.getElementById('m-name').value.trim();
+  var p = document.getElementById('m-phone').value.trim();
+  var em = document.getElementById('m-email').value.trim();
+  if (!n) { toast('Enter a name'); return; }
+  if (!p && !em) { toast('Add phone or email'); return; }
+  contacts.push({name: n, phone: p, email: em});
+  saveContacts(); renderContacts(); closeModal();
+  toast(n + ' added');
 }
 
-navigator.geolocation.watchPosition(pos=>{
-  fetch('/update_location',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lat:pos.coords.latitude,lng:pos.coords.longitude})});
-  marker.setLatLng([pos.coords.latitude,pos.coords.longitude]);map.setView([pos.coords.latitude,pos.coords.longitude],15);
-  const s=document.getElementById('gps-status');s.textContent='ON';s.className='chip-v on';
-},()=>{toast('Enable GPS for tracking');const s=document.getElementById('gps-status');s.textContent='OFF';s.className='chip-v off'},{enableHighAccuracy:true});
+/* ── GPS ── */
+navigator.geolocation.watchPosition(
+  function(pos) {
+    fetch('/update_location', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({lat: pos.coords.latitude, lng: pos.coords.longitude})
+    });
+    marker.setLatLng([pos.coords.latitude, pos.coords.longitude]);
+    map.setView([pos.coords.latitude, pos.coords.longitude], 15);
+    var s = document.getElementById('gps-status'); s.textContent = 'ON'; s.className = 'chip-v on';
+  },
+  function() {
+    toast('Enable GPS for tracking');
+    var s = document.getElementById('gps-status'); s.textContent = 'OFF'; s.className = 'chip-v off';
+  },
+  {enableHighAccuracy: true}
+);
 
-function sendSOS(){
-  if(!contacts.length){toast('⚠️ Add a contact first');return}
-  const uname=document.getElementById('name').value.trim()||getCookie('username')||'Unknown';
-  if(uname==='Unknown'){toast('⚠️ Please save your name first');return}
-  toast('🚨 Sending SOS to '+contacts.length+' contact'+(contacts.length>1?'s':'')+'...');
-  let done=0,ok=0,fail=0;
-  contacts.forEach(c=>{
-    fetch('/sos',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({name:uname,phone:c.phone||'',email:c.email||''})
+/* ── SOS ── */
+function sendSOS() {
+  if (!contacts.length) { toast('Add a contact first'); return; }
+  var uname = document.getElementById('name').value.trim() || getCookie('username') || 'Unknown';
+  if (uname === 'Unknown') { toast('Please save your name first'); return; }
+  toast('Sending SOS to ' + contacts.length + ' contact' + (contacts.length > 1 ? 's' : '') + '...');
+  var done = 0, ok = 0, fail = 0;
+  contacts.forEach(function(c) {
+    fetch('/sos', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: uname, phone: c.phone || '', email: c.email || ''})
     })
-    .then(r=>r.json())
-    .then(d=>{
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
       done++;
-      if(d.status&&d.status.includes('✅')){ok++}
-      else{fail++;console.error(c.name+':',d.status,d.trace||'');toast('❌ '+c.name+': '+(d.status||'Unknown error'))}
-      if(done===contacts.length){
-        if(ok>0&&fail===0)toast('✅ SOS sent to all '+ok+' contact'+(ok>1?'s':'')+'!');
-        else if(ok>0)toast('⚠️ Sent to '+ok+', failed '+fail);
-        else toast('❌ All sends failed. Check Render logs.');
+      if (d.status && d.status.indexOf('✅') !== -1) { ok++; }
+      else { fail++; toast(c.name + ': ' + (d.status || 'Unknown error')); }
+      if (done === contacts.length) {
+        if (ok > 0 && fail === 0) toast('SOS sent to all ' + ok + ' contact' + (ok > 1 ? 's' : '') + '!');
+        else if (ok > 0) toast('Sent to ' + ok + ', failed ' + fail);
+        else toast('All sends failed. Check server logs.');
       }
     })
-    .catch(err=>{done++;fail++;toast('❌ Network error: '+err.message)});
+    .catch(function(err) { done++; fail++; toast('Network error: ' + err.message); });
   });
 }
 
-const keywords=["help","save me","stop","danger"];
-function autoCall(){const f=contacts.find(c=>c.phone);if(f)window.location.href='tel:'+f.phone}
-function triggerAutoSOS(){toast('Keyword detected! SOS firing...');sendSOS();autoCall()}
-function startVoice(){
-  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!SR){const v=document.getElementById('voice-status');v.textContent='N/A';v.className='chip-v off';return}
-  const r=new SR();r.continuous=true;r.lang='en-US';r.interimResults=false;
-  r.onresult=e=>{const txt=e.results[e.results.length-1][0].transcript.toLowerCase();for(const k of keywords)if(txt.includes(k)){triggerAutoSOS();break}};
-  r.onerror=()=>{};r.onend=()=>r.start();r.start();
-  const v=document.getElementById('voice-status');v.textContent='ON';v.className='chip-v on';
+/* ── VOICE DETECTION ── */
+var keywords = ["help", "save me", "stop", "danger"];
+function autoCall() {
+  var f = contacts.find(function(c) { return c.phone; });
+  if (f) window.location.href = 'tel:' + f.phone;
 }
+function triggerAutoSOS() { toast('Keyword detected! SOS firing...'); sendSOS(); autoCall(); }
+function startVoice() {
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    var v = document.getElementById('voice-status'); v.textContent = 'N/A'; v.className = 'chip-v off';
+    return;
+  }
+  var r = new SR(); r.continuous = true; r.lang = 'en-US'; r.interimResults = false;
+  r.onresult = function(e) {
+    var txt = e.results[e.results.length - 1][0].transcript.toLowerCase();
+    for (var i = 0; i < keywords.length; i++) {
+      if (txt.indexOf(keywords[i]) !== -1) { triggerAutoSOS(); break; }
+    }
+  };
+  r.onerror = function() {};
+  r.onend = function() { r.start(); };
+  r.start();
+  var v = document.getElementById('voice-status'); v.textContent = 'ON'; v.className = 'chip-v on';
+}
+
 loadContacts();
-setTimeout(startVoice,2000);
+setTimeout(startVoice, 2000);
 </script>
 </body>
 </html>"""
@@ -405,7 +493,10 @@ setTimeout(startVoice,2000);
 # ============================================================
 @app.route("/")
 def home():
-    return render_template_string(HTML)
+    # Return plain Response — NOT render_template_string.
+    # render_template_string passes HTML through Jinja2 which crashes on
+    # the JS curly-braces (e.g. object literals, template strings).
+    return Response(HTML, mimetype="text/html")
 
 
 @app.route("/update_location", methods=["POST"])
@@ -419,12 +510,12 @@ def update_location():
 @app.route("/sos", methods=["POST"])
 def sos():
     try:
-        data = request.json
-        lat  = live_location.get("lat")
-        lng  = live_location.get("lng")
+        data   = request.json
+        lat    = live_location.get("lat")
+        lng    = live_location.get("lng")
 
         if not lat or not lng:
-            return jsonify({"status": "❌ Location not available yet. Allow GPS and wait a few seconds, then try again."})
+            return jsonify({"status": "❌ Location not available yet. Allow GPS and wait a few seconds."})
 
         map_url = f"https://www.google.com/maps?q={lat},{lng}"
         errors  = []
@@ -433,7 +524,7 @@ def sos():
         if data.get("phone"):
             try:
                 if not twilio_client:
-                    raise Exception("Twilio not set up. Add TWILIO_SID, TWILIO_AUTH, TWILIO_NUMBER in Render env vars.")
+                    raise Exception("Twilio not configured. Set TWILIO_SID / TWILIO_AUTH / TWILIO_NUMBER env vars.")
                 sms_body = (
                     f"🚨 SOS ALERT — PROTRACTOR\n"
                     f"{'─'*24}\n"
@@ -457,7 +548,7 @@ def sos():
             try:
                 html_body = f"""<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>SOS Alert</title></head>
+<head><meta charset="UTF-8"><title>SOS Alert</title></head>
 <body style="margin:0;padding:0;background:#f0ebe2;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0ebe2;padding:32px 0;">
     <tr><td align="center">
@@ -473,19 +564,12 @@ def sos():
           </tr></table>
         </td></tr>
         <tr><td style="background:#c8392b;padding:20px 32px;">
-          <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-            <td>
-              <div style="font-size:11px;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,.65);margin-bottom:6px;">Emergency Alert</div>
-              <div style="font-size:26px;font-weight:900;color:#fff;line-height:1.1;">&#128680; SOS Triggered</div>
-            </td>
-            <td align="right" style="vertical-align:top;">
-              <div style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);border-radius:20px;padding:5px 12px;font-size:11px;font-weight:600;color:white;white-space:nowrap;">URGENT</div>
-            </td>
-          </tr></table>
+          <div style="font-size:11px;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,.65);margin-bottom:6px;">Emergency Alert</div>
+          <div style="font-size:26px;font-weight:900;color:#fff;line-height:1.1;">&#128680; SOS Triggered</div>
         </td></tr>
         <tr><td style="background:#ffffff;padding:28px 32px;">
           <p style="margin:0 0 20px;font-size:14px;color:#5a5248;line-height:1.7;">
-            <strong style="color:#1a1612;">{data['name']}</strong> has triggered an emergency SOS alert via Protractor. Please respond immediately or contact emergency services.
+            <strong style="color:#1a1612;">{data['name']}</strong> has triggered an emergency SOS via Protractor. Please respond immediately or contact emergency services.
           </p>
           <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:16px;">
             <tr><td style="padding-bottom:10px;">
@@ -517,8 +601,8 @@ def sos():
           <hr style="border:none;border-top:1px solid #ece6d9;margin:0 0 16px;">
           <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#8a8070;font-weight:600;margin-bottom:10px;">Recommended Actions</div>
           <table width="100%" cellpadding="0" cellspacing="0" border="0">
-            <tr><td style="padding-bottom:8px;font-size:13px;color:#2e2820;line-height:1.5;">&#128222; Call <strong>{data['name']}</strong> immediately to check their status</td></tr>
-            <tr><td style="padding-bottom:8px;font-size:13px;color:#2e2820;line-height:1.5;">&#128506; Use the location link above to find their exact position</td></tr>
+            <tr><td style="padding-bottom:8px;font-size:13px;color:#2e2820;line-height:1.5;">&#128222; Call <strong>{data['name']}</strong> immediately</td></tr>
+            <tr><td style="padding-bottom:8px;font-size:13px;color:#2e2820;line-height:1.5;">&#128506; Use the location link above to find them</td></tr>
             <tr><td style="font-size:13px;color:#2e2820;line-height:1.5;">&#128659; Contact emergency services (112) if unreachable</td></tr>
           </table>
         </td></tr>
@@ -530,6 +614,7 @@ def sos():
     </td></tr>
   </table>
 </body></html>"""
+
                 plain_body = (
                     f"SOS ALERT from Protractor!\n"
                     f"Person: {data['name']}\n"
@@ -537,7 +622,7 @@ def sos():
                     f"Coords: {lat:.6f}, {lng:.6f}\n\n"
                     f"This person needs immediate help. Call them or dial 112."
                 )
-                subject = f"🚨 SOS Alert — {data['name']} needs help NOW"
+                subject = f"SOS Alert — {data['name']} needs help NOW"
                 send_email_brevo(data["email"], subject, html_body, plain_body)
             except Exception as e:
                 errors.append(f"Email: {e}")
