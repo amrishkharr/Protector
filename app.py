@@ -1,7 +1,8 @@
 from flask import Flask, request, jsonify, Response
 from twilio.rest import Client
-import urllib.request
-import urllib.error
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 import json
 import os
 
@@ -11,17 +12,23 @@ app = Flask(__name__)
 #  CONFIG — set ALL of these in Render → Environment Variables
 #
 #   TWILIO_SID      →  Account SID from twilio.com/console
-#   TWILIO_AUTH     →  Auth Token from twilio.com/console (click eye icon)
+#   TWILIO_AUTH     →  Auth Token from twilio.com/console
 #   TWILIO_NUMBER   →  Your Twilio number e.g. +16623747889
-#   EMAIL_ADDRESS   →  Sender email verified on Brevo
-#   BREVO_API_KEY   →  brevo.com → SMTP & API → API Keys → create key
-#                      (real key looks like: xkeysib-abc123...  ~64 chars)
+#
+#   SMTP_HOST       →  smtp.gmail.com  (or smtp-mail.outlook.com etc.)
+#   SMTP_PORT       →  587
+#   SMTP_USER       →  your-email@gmail.com
+#   SMTP_PASS       →  Gmail App Password (16 chars, NOT your login password)
+#                      myaccount.google.com → Security → App passwords
 # ============================================================
 TWILIO_SID    = os.environ.get("TWILIO_SID",    "")
 TWILIO_AUTH   = os.environ.get("TWILIO_AUTH",   "")
 TWILIO_NUMBER = os.environ.get("TWILIO_NUMBER", "")
-EMAIL_ADDRESS = os.environ.get("EMAIL_ADDRESS", "nexus.srmist@gmail.com")
-BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "")
+
+SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASS = os.environ.get("SMTP_PASS", "")
 
 try:
     twilio_client = Client(TWILIO_SID, TWILIO_AUTH) if TWILIO_SID and TWILIO_AUTH else None
@@ -33,39 +40,26 @@ saved_contacts = []
 
 
 # ============================================================
-#  EMAIL via Brevo HTTP API
+#  EMAIL via smtplib (works with Gmail, Outlook, any SMTP)
 # ============================================================
-def send_email_brevo(to_email, subject, html_body, plain_body):
-    if not BREVO_API_KEY:
-        raise Exception("BREVO_API_KEY env var is empty. Set it in Render → Environment.")
-    if not BREVO_API_KEY.startswith("xkeysib-"):
-        raise Exception(f"BREVO_API_KEY looks wrong (got: {BREVO_API_KEY[:12]}...). Real keys start with xkeysib-")
+def send_email_smtp(to_email, subject, html_body, plain_body):
+    if not SMTP_USER or not SMTP_PASS:
+        raise Exception("SMTP_USER or SMTP_PASS env vars are empty. Set them in Render → Environment.")
 
-    payload = json.dumps({
-        "sender":      {"name": "Protractor SOS", "email": EMAIL_ADDRESS},
-        "to":          [{"email": to_email}],
-        "subject":     subject,
-        "htmlContent": html_body,
-        "textContent": plain_body,
-    }).encode("utf-8")
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"]    = f"Protractor SOS <{SMTP_USER}>"
+    msg["To"]      = to_email
 
-    req = urllib.request.Request(
-        "https://api.brevo.com/v3/smtp/email",
-        data=payload,
-        headers={
-            "api-key":      BREVO_API_KEY,
-            "Content-Type": "application/json",
-            "Accept":       "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            if resp.status not in (200, 201):
-                raise Exception(f"Brevo returned HTTP {resp.status}")
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="ignore")
-        raise Exception(f"Brevo HTTP {e.code}: {body}")
+    msg.attach(MIMEText(plain_body, "plain"))
+    msg.attach(MIMEText(html_body,  "html"))
+
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as server:
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+        server.login(SMTP_USER, SMTP_PASS)
+        server.sendmail(SMTP_USER, to_email, msg.as_string())
 
 
 # ============================================================
@@ -530,16 +524,16 @@ def update_location():
 
 @app.route("/debug")
 def debug():
-    """Visit https://protractor.onrender.com/debug to verify credentials are loaded."""
+    """Visit /debug to verify credentials are loaded."""
     return jsonify({
         "TWILIO_SID_set":    bool(TWILIO_SID),
-        "TWILIO_SID_prefix": TWILIO_SID[:6] if TWILIO_SID else "EMPTY — set in Render env vars",
+        "TWILIO_SID_prefix": TWILIO_SID[:6] if TWILIO_SID else "EMPTY",
         "TWILIO_AUTH_set":   bool(TWILIO_AUTH),
-        "TWILIO_NUMBER":     TWILIO_NUMBER or "EMPTY — set in Render env vars",
-        "BREVO_KEY_set":     bool(BREVO_API_KEY),
-        "BREVO_KEY_prefix":  BREVO_API_KEY[:12] if BREVO_API_KEY else "EMPTY — set in Render env vars",
-        "BREVO_KEY_valid":   BREVO_API_KEY.startswith("xkeysib-") if BREVO_API_KEY else False,
-        "EMAIL_ADDRESS":     EMAIL_ADDRESS,
+        "TWILIO_NUMBER":     TWILIO_NUMBER or "EMPTY",
+        "SMTP_HOST":         SMTP_HOST,
+        "SMTP_PORT":         SMTP_PORT,
+        "SMTP_USER":         SMTP_USER or "EMPTY",
+        "SMTP_PASS_set":     bool(SMTP_PASS),
     })
 
 
@@ -578,7 +572,7 @@ def sos():
             except Exception as e:
                 errors.append(f"SMS: {e}")
 
-        # ── Email via Brevo ─────────────────────────────────────────
+        # ── Email via smtplib ───────────────────────────────────────
         if data.get("email"):
             try:
                 html_body = f"""<!DOCTYPE html>
@@ -637,7 +631,7 @@ def sos():
                     f"Needs immediate help. Call them or dial 112."
                 )
                 subject = f"SOS Alert — {data['name']} needs help NOW"
-                send_email_brevo(data["email"], subject, html_body, plain_body)
+                send_email_smtp(data["email"], subject, html_body, plain_body)
             except Exception as e:
                 errors.append(f"Email: {e}")
 
