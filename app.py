@@ -8,36 +8,38 @@ import os
 app = Flask(__name__)
 
 # ============================================================
-#  CONFIG — Set these as Environment Variables (e.g. on Render)
+#  CONFIG — set ALL of these in Render → Environment Variables
 #
-#   TWILIO_SID      →  from twilio.com/console
-#   TWILIO_AUTH     →  from twilio.com/console
-#   TWILIO_NUMBER   →  your Twilio number e.g. +18457738393
-#   EMAIL_ADDRESS   →  nexus.srmist@gmail.com
-#   BREVO_API_KEY   →  from brevo.com → SMTP & API → API Keys
+#   TWILIO_SID      →  Account SID from twilio.com/console
+#   TWILIO_AUTH     →  Auth Token from twilio.com/console (click eye icon)
+#   TWILIO_NUMBER   →  Your Twilio number e.g. +16623747889
+#   EMAIL_ADDRESS   →  Sender email verified on Brevo
+#   BREVO_API_KEY   →  brevo.com → SMTP & API → API Keys → create key
+#                      (real key looks like: xkeysib-abc123...  ~64 chars)
 # ============================================================
-TWILIO_SID    = os.environ.get("TWILIO_SID",    "AC898603a23a41af045d16c37018f529dd")
-TWILIO_AUTH   = os.environ.get("TWILIO_AUTH",   "cfda345c1a464abfb4a592cea2472be4")
-TWILIO_NUMBER = os.environ.get("TWILIO_NUMBER", "+16623747889")
+TWILIO_SID    = os.environ.get("TWILIO_SID",    "")
+TWILIO_AUTH   = os.environ.get("TWILIO_AUTH",   "")
+TWILIO_NUMBER = os.environ.get("TWILIO_NUMBER", "")
 EMAIL_ADDRESS = os.environ.get("EMAIL_ADDRESS", "nexus.srmist@gmail.com")
-BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "bsks2SA9RvtkmrA")
+BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "")
 
 try:
     twilio_client = Client(TWILIO_SID, TWILIO_AUTH) if TWILIO_SID and TWILIO_AUTH else None
 except Exception:
     twilio_client = None
 
-live_location = {}
-saved_contacts = []   # server-side contact store
+live_location  = {}
+saved_contacts = []
 
 
 # ============================================================
-#  EMAIL via Brevo HTTP API — works on Render free tier
-#  (replaces smtplib which is blocked on Render)
+#  EMAIL via Brevo HTTP API
 # ============================================================
 def send_email_brevo(to_email, subject, html_body, plain_body):
     if not BREVO_API_KEY:
-        raise Exception("BREVO_API_KEY not set. Add it in Render environment variables.")
+        raise Exception("BREVO_API_KEY env var is empty. Set it in Render → Environment.")
+    if not BREVO_API_KEY.startswith("xkeysib-"):
+        raise Exception(f"BREVO_API_KEY looks wrong (got: {BREVO_API_KEY[:12]}...). Real keys start with xkeysib-")
 
     payload = json.dumps({
         "sender":      {"name": "Protractor SOS", "email": EMAIL_ADDRESS},
@@ -67,9 +69,7 @@ def send_email_brevo(to_email, subject, html_body, plain_body):
 
 
 # ============================================================
-#  UI  — NOTE: We return this as a plain Response (not
-#  render_template_string) to avoid Jinja2 trying to parse
-#  the JavaScript curly braces and crashing with TemplateSyntaxError.
+#  UI
 # ============================================================
 HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -305,7 +305,7 @@ var marker = L.marker([0, 0], {icon: pin}).addTo(map);
 function toast(msg) {
   var t = document.getElementById('toast');
   t.textContent = msg; t.style.display = 'block';
-  clearTimeout(t._t); t._t = setTimeout(function() { t.style.display = 'none'; }, 3200);
+  clearTimeout(t._t); t._t = setTimeout(function() { t.style.display = 'none'; }, 4000);
 }
 
 /* ── PROFILE ── */
@@ -330,7 +330,7 @@ function getCookie(k) {
   }
 })();
 
-/* ── CONTACTS (cookie-based, no localStorage) ── */
+/* ── CONTACTS (server-side storage) ── */
 var contacts = [];
 var PALETTE = [
   {bg:'rgba(255,64,96,.18)',  border:'rgba(255,64,96,.3)',  txt:'#ff4060', strip:'linear-gradient(to bottom,#ff4060,#ff7a5c)'},
@@ -344,7 +344,6 @@ function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-/* Save/load contacts via server — most reliable on Render */
 function saveContacts() {
   fetch('/save_contacts', {
     method: 'POST',
@@ -435,25 +434,33 @@ navigator.geolocation.watchPosition(
 /* ── SOS ── */
 function sendSOS() {
   if (!contacts.length) { toast('Add a contact first'); return; }
-  var uname = document.getElementById('name').value.trim() || getCookie('username') || 'Unknown';
-  if (uname === 'Unknown') { toast('Please save your name first'); return; }
+  var uname = document.getElementById('name').value.trim() || getCookie('username') || '';
+  if (!uname) { toast('Please save your name first'); return; }
   toast('Sending SOS to ' + contacts.length + ' contact' + (contacts.length > 1 ? 's' : '') + '...');
   var done = 0, ok = 0, fail = 0;
   contacts.forEach(function(c) {
     fetch('/sos', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name: uname, phone: c.phone || '', email: c.email || '', lat: lastLat, lng: lastLng, contacts: contacts})
+      body: JSON.stringify({
+        name:  uname,
+        phone: c.phone || '',
+        email: c.email || '',
+        lat:   lastLat,
+        lng:   lastLng
+      })
     })
     .then(function(r) { return r.json(); })
     .then(function(d) {
       done++;
-      if (d.status && d.status.indexOf('✅') !== -1) { ok++; }
-      else { fail++; toast(c.name + ': ' + (d.status || 'Unknown error')); }
+      if (d.status && d.status.indexOf('\u2705') !== -1) { ok++; }
+      else {
+        fail++;
+        toast((d.status || 'Unknown error').substring(0, 120));
+      }
       if (done === contacts.length) {
         if (ok > 0 && fail === 0) toast('SOS sent to all ' + ok + ' contact' + (ok > 1 ? 's' : '') + '!');
         else if (ok > 0) toast('Sent to ' + ok + ', failed ' + fail);
-        else toast('All sends failed. Check server logs.');
       }
     })
     .catch(function(err) { done++; fail++; toast('Network error: ' + err.message); });
@@ -498,9 +505,6 @@ setTimeout(startVoice, 2000);
 # ============================================================
 @app.route("/")
 def home():
-    # Return plain Response — NOT render_template_string.
-    # render_template_string passes HTML through Jinja2 which crashes on
-    # the JS curly-braces (e.g. object literals, template strings).
     return Response(HTML, mimetype="text/html")
 
 
@@ -510,7 +514,7 @@ def get_contacts():
 
 
 @app.route("/save_contacts", methods=["POST"])
-def save_contacts():
+def save_contacts_route():
     global saved_contacts
     saved_contacts = request.json.get("contacts", [])
     return jsonify({"status": "saved"})
@@ -524,17 +528,27 @@ def update_location():
     return jsonify({"status": "updated"})
 
 
+@app.route("/debug")
+def debug():
+    """Visit https://protractor.onrender.com/debug to verify credentials are loaded."""
+    return jsonify({
+        "TWILIO_SID_set":    bool(TWILIO_SID),
+        "TWILIO_SID_prefix": TWILIO_SID[:6] if TWILIO_SID else "EMPTY — set in Render env vars",
+        "TWILIO_AUTH_set":   bool(TWILIO_AUTH),
+        "TWILIO_NUMBER":     TWILIO_NUMBER or "EMPTY — set in Render env vars",
+        "BREVO_KEY_set":     bool(BREVO_API_KEY),
+        "BREVO_KEY_prefix":  BREVO_API_KEY[:12] if BREVO_API_KEY else "EMPTY — set in Render env vars",
+        "BREVO_KEY_valid":   BREVO_API_KEY.startswith("xkeysib-") if BREVO_API_KEY else False,
+        "EMAIL_ADDRESS":     EMAIL_ADDRESS,
+    })
+
+
 @app.route("/sos", methods=["POST"])
 def sos():
     try:
-        data   = request.json
-        lat    = data.get("lat") or live_location.get("lat")
-        lng    = data.get("lng") or live_location.get("lng")
-
-        # If frontend didn't send contacts, fall back to server-stored ones
-        req_contacts = data.get("contacts")
-        if not req_contacts:
-            req_contacts = saved_contacts
+        data = request.json
+        lat  = data.get("lat") or live_location.get("lat")
+        lng  = data.get("lng") or live_location.get("lng")
 
         if not lat or not lng:
             return jsonify({"status": "❌ Location not available yet. Allow GPS and wait a few seconds."})
@@ -545,17 +559,16 @@ def sos():
         # ── SMS via Twilio ──────────────────────────────────────────
         if data.get("phone"):
             try:
+                if not TWILIO_SID or not TWILIO_AUTH or not TWILIO_NUMBER:
+                    raise Exception("Twilio env vars missing. Set TWILIO_SID, TWILIO_AUTH, TWILIO_NUMBER in Render.")
                 if not twilio_client:
-                    raise Exception("Twilio not configured. Set TWILIO_SID / TWILIO_AUTH / TWILIO_NUMBER env vars.")
+                    raise Exception("Twilio client failed to initialise. Check SID and AUTH token.")
                 sms_body = (
-                    f"🚨 SOS ALERT — PROTRACTOR\n"
-                    f"{'─'*24}\n"
-                    f"👤 Person : {data['name']}\n"
-                    f"📍 Coords : {lat:.5f}, {lng:.5f}\n"
-                    f"🗺  Maps  : {map_url}\n"
-                    f"{'─'*24}\n"
-                    f"⚠️ Needs IMMEDIATE help.\n"
-                    f"📞 Call them or dial 112 now."
+                    f"SOS ALERT - PROTRACTOR\n"
+                    f"Person: {data['name']}\n"
+                    f"Location: {map_url}\n"
+                    f"Coords: {lat:.5f}, {lng:.5f}\n"
+                    f"Needs IMMEDIATE help. Call or dial 112."
                 )
                 twilio_client.messages.create(
                     body=sms_body,
@@ -565,84 +578,63 @@ def sos():
             except Exception as e:
                 errors.append(f"SMS: {e}")
 
-        # ── Email via Brevo HTTP API ────────────────────────────────
+        # ── Email via Brevo ─────────────────────────────────────────
         if data.get("email"):
             try:
                 html_body = f"""<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><title>SOS Alert</title></head>
-<body style="margin:0;padding:0;background:#f0ebe2;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0ebe2;padding:32px 0;">
+<html><head><meta charset="UTF-8"><title>SOS Alert</title></head>
+<body style="margin:0;padding:0;background:#f0ebe2;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:32px 0;">
     <tr><td align="center">
-      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;">
+      <table width="100%" style="max-width:520px;">
         <tr><td style="height:5px;background:#c8392b;border-radius:8px 8px 0 0;"></td></tr>
-        <tr><td style="background:#1a1612;padding:28px 32px 22px;">
-          <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-            <td>
-              <div style="font-size:22px;font-weight:900;color:#f5f0e8;">Protractor<span style="color:#c8392b;">.</span></div>
-              <div style="font-size:10px;letter-spacing:3px;text-transform:uppercase;color:#8a8070;margin-top:3px;">Personal Safety Guard</div>
-            </td>
-            <td align="right"><div style="background:#c8392b;border-radius:50%;width:44px;height:44px;text-align:center;line-height:44px;font-size:22px;">&#128737;</div></td>
-          </tr></table>
+        <tr><td style="background:#1a1612;padding:24px 32px;">
+          <div style="font-size:22px;font-weight:900;color:#f5f0e8;">Protractor<span style="color:#c8392b;">.</span></div>
+          <div style="font-size:10px;letter-spacing:3px;color:#8a8070;margin-top:3px;">PERSONAL SAFETY GUARD</div>
         </td></tr>
         <tr><td style="background:#c8392b;padding:20px 32px;">
-          <div style="font-size:11px;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,.65);margin-bottom:6px;">Emergency Alert</div>
-          <div style="font-size:26px;font-weight:900;color:#fff;line-height:1.1;">&#128680; SOS Triggered</div>
+          <div style="font-size:11px;letter-spacing:3px;color:rgba(255,255,255,.65);margin-bottom:6px;">EMERGENCY ALERT</div>
+          <div style="font-size:26px;font-weight:900;color:#fff;">&#128680; SOS Triggered</div>
         </td></tr>
-        <tr><td style="background:#ffffff;padding:28px 32px;">
-          <p style="margin:0 0 20px;font-size:14px;color:#5a5248;line-height:1.7;">
-            <strong style="color:#1a1612;">{data['name']}</strong> has triggered an emergency SOS via Protractor. Please respond immediately or contact emergency services.
+        <tr><td style="background:#fff;padding:28px 32px;">
+          <p style="font-size:14px;color:#5a5248;line-height:1.7;margin:0 0 20px;">
+            <strong style="color:#1a1612;">{data['name']}</strong> has triggered an emergency SOS. Please respond immediately.
           </p>
-          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:16px;">
-            <tr><td style="padding-bottom:10px;">
-              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#fdecea;border:1px solid #f0c4bf;border-radius:12px;padding:14px 16px;"><tr>
-                <td style="font-size:18px;width:36px;vertical-align:middle;">&#128100;</td>
-                <td style="padding-left:10px;vertical-align:middle;">
-                  <div style="font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:#c8392b;font-weight:600;">Person in distress</div>
-                  <div style="font-size:15px;font-weight:700;color:#1a1612;margin-top:2px;">{data['name']}</div>
-                </td>
-              </tr></table>
-            </td></tr>
-            <tr><td>
-              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f0e8;border:1px solid #e0d8cc;border-radius:12px;padding:14px 16px;"><tr>
-                <td style="font-size:18px;width:36px;vertical-align:middle;">&#128205;</td>
-                <td style="padding-left:10px;vertical-align:middle;">
-                  <div style="font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:#8a8070;font-weight:600;">GPS Coordinates</div>
-                  <div style="font-size:13px;font-weight:600;color:#1a1612;margin-top:2px;font-family:monospace;">{lat:.6f}, {lng:.6f}</div>
-                </td>
-              </tr></table>
-            </td></tr>
-          </table>
-          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;">
-            <tr><td align="center">
-              <a href="{map_url}" target="_blank" style="display:inline-block;background:#c8392b;color:#fff;text-decoration:none;font-size:14px;font-weight:700;padding:14px 32px;border-radius:12px;">
-                &#128205;&nbsp; Open Live Location on Maps
-              </a>
-            </td></tr>
-          </table>
+          <div style="background:#fdecea;border:1px solid #f0c4bf;border-radius:12px;padding:14px 16px;margin-bottom:10px;">
+            <div style="font-size:10px;color:#c8392b;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;">Person in distress</div>
+            <div style="font-size:15px;font-weight:700;color:#1a1612;margin-top:4px;">{data['name']}</div>
+          </div>
+          <div style="background:#f5f0e8;border:1px solid #e0d8cc;border-radius:12px;padding:14px 16px;margin-bottom:20px;">
+            <div style="font-size:10px;color:#8a8070;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;">GPS Coordinates</div>
+            <div style="font-size:13px;font-weight:600;color:#1a1612;margin-top:4px;font-family:monospace;">{lat:.6f}, {lng:.6f}</div>
+          </div>
+          <div style="text-align:center;margin-bottom:24px;">
+            <a href="{map_url}" target="_blank"
+               style="display:inline-block;background:#c8392b;color:#fff;text-decoration:none;
+                      font-size:14px;font-weight:700;padding:14px 32px;border-radius:12px;">
+              &#128205; Open Live Location on Maps
+            </a>
+          </div>
           <hr style="border:none;border-top:1px solid #ece6d9;margin:0 0 16px;">
-          <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#8a8070;font-weight:600;margin-bottom:10px;">Recommended Actions</div>
-          <table width="100%" cellpadding="0" cellspacing="0" border="0">
-            <tr><td style="padding-bottom:8px;font-size:13px;color:#2e2820;line-height:1.5;">&#128222; Call <strong>{data['name']}</strong> immediately</td></tr>
-            <tr><td style="padding-bottom:8px;font-size:13px;color:#2e2820;line-height:1.5;">&#128506; Use the location link above to find them</td></tr>
-            <tr><td style="font-size:13px;color:#2e2820;line-height:1.5;">&#128659; Contact emergency services (112) if unreachable</td></tr>
-          </table>
+          <div style="font-size:13px;color:#2e2820;line-height:2;">
+            &#128222; Call <strong>{data['name']}</strong> immediately<br>
+            &#128506; Use location link above to find them<br>
+            &#128659; Contact emergency services (112) if unreachable
+          </div>
         </td></tr>
-        <tr><td style="background:#1a1612;padding:18px 32px;border-radius:0 0 8px 8px;">
-          <div style="font-size:12px;color:#8a8070;">Sent by <strong style="color:#f5f0e8;">Protractor</strong> safety app &nbsp;|&nbsp; Automated alert — do not ignore.</div>
+        <tr><td style="background:#1a1612;padding:16px 32px;border-radius:0 0 8px 8px;">
+          <div style="font-size:12px;color:#8a8070;">Sent by <strong style="color:#f5f0e8;">Protractor</strong> — do not ignore this alert.</div>
         </td></tr>
-        <tr><td style="height:4px;background:#c8392b;border-radius:0 0 8px 8px;"></td></tr>
       </table>
     </td></tr>
   </table>
 </body></html>"""
-
                 plain_body = (
                     f"SOS ALERT from Protractor!\n"
                     f"Person: {data['name']}\n"
                     f"Location: {map_url}\n"
                     f"Coords: {lat:.6f}, {lng:.6f}\n\n"
-                    f"This person needs immediate help. Call them or dial 112."
+                    f"Needs immediate help. Call them or dial 112."
                 )
                 subject = f"SOS Alert — {data['name']} needs help NOW"
                 send_email_brevo(data["email"], subject, html_body, plain_body)
@@ -650,7 +642,7 @@ def sos():
                 errors.append(f"Email: {e}")
 
         if errors:
-            return jsonify({"status": f"❌ Error: {'; '.join(errors)}"})
+            return jsonify({"status": f"❌ Error: {'; '.join(errors)}\n"})
         return jsonify({"status": "✅ SOS sent successfully!"})
 
     except Exception as e:
@@ -671,9 +663,6 @@ def manifest():
     })
 
 
-# ============================================================
-#  START
-# ============================================================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
