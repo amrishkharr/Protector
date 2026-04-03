@@ -212,7 +212,12 @@ body{min-height:100%;font-family:'Plus Jakarta Sans',sans-serif;background:var(-
 
   <div class="header">
     <div class="hb">
-      <div class="logo">&#128272;</div>
+      <div class="logo"><svg width="26" height="26" viewBox="0 0 26 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M13 2L22 6.5V13C22 18 17.5 22.5 13 24C8.5 22.5 4 18 4 13V6.5Z" stroke="white" stroke-width="1.8" stroke-linejoin="round" fill="rgba(255,255,255,0.12)"/>
+  <rect x="9.5" y="12" width="7" height="6" rx="1.5" fill="white"/>
+  <path d="M10.5 12V9.5C10.5 8.1 11.3 7 13 7C14.7 7 15.5 8.1 15.5 9.5V12" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
+  <circle cx="13" cy="15.2" r="1.2" fill="#ff4060"/>
+</svg></div>
       <div>
         <div class="appname">Protector</div>
         <div class="subline">Personal Safety Guard</div>
