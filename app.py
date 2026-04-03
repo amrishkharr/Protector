@@ -17,10 +17,10 @@ app = Flask(__name__)
 #   BREVO_API_KEY   →  from brevo.com → SMTP & API → API Keys
 # ============================================================
 TWILIO_SID    = os.environ.get("TWILIO_SID",    "ACb053c150e0efb5890ad3ff32c4686df8")
-TWILIO_AUTH   = os.environ.get("TWILIO_AUTH",   "18c80cbe5108877d636e1e3d2c8e4b23")
+TWILIO_AUTH   = os.environ.get("TWILIO_AUTH",   "0434090f0def5b3903bed6c9bbbe4a76")
 TWILIO_NUMBER = os.environ.get("TWILIO_NUMBER", "+18457738393")
 EMAIL_ADDRESS = os.environ.get("EMAIL_ADDRESS", "nexus.srmist@gmail.com")
-BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "xsmtpsib-7a6ffdc9375200850c5956db3a39956a6c87b57981a9d7e5efef0f2fde92581e-FF8w9ohZ5SFxaWfX")
+BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "bsks2SA9RvtkmrA")
 
 try:
     twilio_client = Client(TWILIO_SID, TWILIO_AUTH) if TWILIO_SID and TWILIO_AUTH else None
