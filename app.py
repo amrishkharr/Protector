@@ -1,25 +1,29 @@
 from flask import Flask, request, jsonify, render_template_string
 from twilio.rest import Client
+import smtplib
+import ssl
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 import os
-import urllib.request
-import urllib.parse
-import json
 
 app = Flask(__name__)
 
-# ---------------- CONFIG ----------------
-# Store these as Environment Variables in Render dashboard, NOT hardcoded.
-# Go to Render → Your Service → Environment → Add the keys below.
-TWILIO_SID    = os.environ.get("TWILIO_SID",    "ACb053c150e0efb5890ad3ff32c4686df8")
-TWILIO_AUTH   = os.environ.get("TWILIO_AUTH",   "18c80cbe5108877d636e1e3d2c8e4b23")
-TWILIO_NUMBER = os.environ.get("TWILIO_NUMBER", "+18457738393")
-SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")   # <-- set this in Render env vars
-EMAIL_ADDRESS    = os.environ.get("EMAIL_ADDRESS", "nexus.srmist@gmail.com")
-
-# NOTE: smtplib (port 465/587) is blocked on Render free tier.
-# This app now uses SendGrid HTTP API instead — works on all plans.
-# Sign up free at https://sendgrid.com → Settings → API Keys → create one
-# Then add it as SENDGRID_API_KEY in Render environment variables.
+# ============================================================
+#  CONFIG  — set these as Environment Variables in Render:
+#
+#   TWILIO_SID      = ACb053c150e0efb5890ad3ff32c4686df8
+#   TWILIO_AUTH     = 18c80cbe5108877d636e1e3d2c8e4b23
+#   TWILIO_NUMBER   = +18457738393
+#   EMAIL_ADDRESS   = nexus.srmist@gmail.com
+#   EMAIL_PASSWORD  = bnon rrkt rndh ahid
+#
+#  Render → Your Service → Environment → Add Environment Variable
+# ============================================================
+TWILIO_SID     = os.environ.get("TWILIO_SID",     "ACb053c150e0efb5890ad3ff32c4686df8")
+TWILIO_AUTH    = os.environ.get("TWILIO_AUTH",    "18c80cbe5108877d636e1e3d2c8e4b23")
+TWILIO_NUMBER  = os.environ.get("TWILIO_NUMBER",  "+18457738393")
+EMAIL_ADDRESS  = os.environ.get("EMAIL_ADDRESS",  "nexus.srmist@gmail.com")
+EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD", "bnon rrkt rndh ahid")
 
 try:
     twilio_client = Client(TWILIO_SID, TWILIO_AUTH)
@@ -28,36 +32,29 @@ except Exception:
 
 live_location = {}
 
-# ---------------- EMAIL via SendGrid HTTP API ----------------
-def send_email_sendgrid(to_email, subject, html_body, plain_body):
-    """Send email via SendGrid REST API (works on Render free tier)."""
-    if not SENDGRID_API_KEY:
-        raise Exception("SENDGRID_API_KEY not set. Add it in Render → Environment.")
+# ============================================================
+#  EMAIL  — Gmail via STARTTLS port 587
+#  Port 465 (SSL) is blocked on Render; port 587 works fine.
+# ============================================================
+def send_email_gmail(to_email, subject, html_body, plain_body):
+    msg = MIMEMultipart("alternative")
+    msg["From"]    = EMAIL_ADDRESS
+    msg["To"]      = to_email
+    msg["Subject"] = subject
+    msg.attach(MIMEText(plain_body, "plain"))
+    msg.attach(MIMEText(html_body,  "html"))
 
-    payload = json.dumps({
-        "personalizations": [{"to": [{"email": to_email}]}],
-        "from": {"email": EMAIL_ADDRESS},
-        "subject": subject,
-        "content": [
-            {"type": "text/plain", "value": plain_body},
-            {"type": "text/html",  "value": html_body},
-        ],
-    }).encode("utf-8")
+    context = ssl.create_default_context()
+    with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as server:
+        server.ehlo()
+        server.starttls(context=context)
+        server.ehlo()
+        server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+        server.sendmail(EMAIL_ADDRESS, to_email, msg.as_string())
 
-    req = urllib.request.Request(
-        "https://api.sendgrid.com/v3/mail/send",
-        data=payload,
-        headers={
-            "Authorization": f"Bearer {SENDGRID_API_KEY}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        if resp.status not in (200, 202):
-            raise Exception(f"SendGrid returned HTTP {resp.status}")
-
-# ---------------- UI ----------------
+# ============================================================
+#  UI
+# ============================================================
 HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -88,8 +85,6 @@ body{min-height:100%;font-family:'Plus Jakarta Sans',sans-serif;background:var(-
     radial-gradient(ellipse 500px 500px at -10% 80%,rgba(155,109,255,.06) 0%,transparent 60%),
     radial-gradient(ellipse 300px 300px at 70% 55%,rgba(61,232,160,.04) 0%,transparent 60%)}
 .wrap{position:relative;z-index:1;max-width:430px;margin:auto;padding-bottom:50px}
-
-/* HEADER */
 .header{padding:52px 20px 18px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;background:linear-gradient(to bottom,var(--bg) 75%,transparent)}
 .hb{display:flex;align-items:center;gap:12px}
 .logo{width:44px;height:44px;border-radius:15px;background:linear-gradient(135deg,var(--red),var(--red2));display:flex;align-items:center;justify-content:center;font-size:22px;box-shadow:0 0 28px var(--redg),0 4px 12px rgba(0,0,0,.5);flex-shrink:0}
@@ -98,31 +93,21 @@ body{min-height:100%;font-family:'Plus Jakarta Sans',sans-serif;background:var(-
 .live-badge{display:flex;align-items:center;gap:6px;background:var(--card);border:1px solid var(--border2);border-radius:30px;padding:8px 14px;font-size:11px;font-weight:700;color:var(--green);letter-spacing:.8px}
 .ld{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 10px var(--green);animation:ld 1.8s ease-in-out infinite}
 @keyframes ld{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.25;transform:scale(.65)}}
-
-/* CHIPS */
 .chips{display:flex;gap:8px;padding:0 14px;margin-bottom:8px}
 .chip{flex:1;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:10px 8px;display:flex;flex-direction:column;align-items:center;gap:3px}
 .chip-ico{font-size:17px;line-height:1}
 .chip-v{font-size:12px;font-weight:800;letter-spacing:.3px}
 .chip-l{font-size:9px;color:var(--sub);letter-spacing:1.5px;text-transform:uppercase;font-weight:600}
 .on{color:var(--green)}.wait{color:var(--amber)}.off{color:var(--sub)}
-
-/* SECTION DIVIDERS */
 .sec{display:flex;align-items:center;gap:10px;padding:14px 18px 10px}
 .sec-line{flex:1;height:1px;background:var(--border)}
 .sec-txt{font-size:9px;font-weight:800;letter-spacing:2.5px;text-transform:uppercase;color:var(--sub);white-space:nowrap}
-
-/* CARDS */
 .card{margin:0 12px 12px;background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:18px;position:relative;overflow:hidden}
 .card::after{content:'';position:absolute;inset:0;border-radius:inherit;background:linear-gradient(140deg,rgba(255,255,255,.025) 0%,transparent 55%);pointer-events:none}
-
-/* PROFILE */
 .p-row{display:flex;align-items:center;gap:14px;margin-bottom:16px}
 .p-av{width:50px;height:50px;border-radius:16px;flex-shrink:0;background:linear-gradient(135deg,rgba(155,109,255,.3),rgba(255,64,96,.15));border:1.5px solid rgba(155,109,255,.3);display:flex;align-items:center;justify-content:center;font-family:'Sora',sans-serif;font-size:20px;font-weight:800;color:var(--violet)}
 .p-lbl{font-size:10px;color:var(--sub);letter-spacing:1px;text-transform:uppercase;font-weight:600}
 .p-name{font-size:16px;font-weight:700;margin-top:1px}
-
-/* FIELDS */
 .field{position:relative;margin-bottom:10px}
 .field-lbl{font-size:10px;color:var(--sub);letter-spacing:1px;text-transform:uppercase;font-weight:700;margin-bottom:5px;padding-left:1px}
 .field input{width:100%;background:var(--bg2);border:1.5px solid var(--border);border-radius:13px;padding:13px 14px 13px 40px;color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;font-weight:500;outline:none;-webkit-appearance:none;transition:border-color .2s,box-shadow .2s}
@@ -131,8 +116,6 @@ body{min-height:100%;font-family:'Plus Jakarta Sans',sans-serif;background:var(-
 .fi{position:absolute;left:13px;bottom:14px;font-size:14px;pointer-events:none;opacity:.7}
 .btn-save{width:100%;margin-top:4px;background:linear-gradient(135deg,rgba(155,109,255,.18),rgba(155,109,255,.08));border:1.5px solid rgba(155,109,255,.3);border-radius:13px;color:var(--violet);font-family:'Plus Jakarta Sans',sans-serif;font-weight:700;font-size:13px;padding:13px;cursor:pointer;letter-spacing:.4px;display:flex;align-items:center;justify-content:center;gap:7px;transition:background .15s,transform .1s}
 .btn-save:active{transform:scale(.98)}
-
-/* CONTACTS */
 .contacts-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
 .contacts-title{font-size:15px;font-weight:800}
 .contacts-badge{font-size:11px;font-weight:700;letter-spacing:.5px;background:var(--violetg);border:1px solid rgba(155,109,255,.25);color:var(--violet);border-radius:20px;padding:3px 10px}
@@ -153,8 +136,6 @@ body{min-height:100%;font-family:'Plus Jakarta Sans',sans-serif;background:var(-
 .c-del:active{background:rgba(255,64,96,.12);color:var(--red)}
 .btn-add{width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:var(--redbg);border:1.5px dashed rgba(255,64,96,.35);border-radius:14px;padding:13px;color:var(--red);font-family:'Plus Jakarta Sans',sans-serif;font-weight:700;font-size:13px;letter-spacing:.3px;cursor:pointer;transition:background .15s,transform .1s}
 .btn-add:active{transform:scale(.98);background:rgba(255,64,96,.14)}
-
-/* SOS */
 .sos-wrap{margin:0 12px 12px;background:var(--card);border:1.5px solid rgba(255,64,96,.2);border-radius:26px;padding:26px 18px 22px;position:relative;overflow:hidden;text-align:center}
 .sos-wrap::before{content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);width:180px;height:1px;background:linear-gradient(90deg,transparent,rgba(255,64,96,.7),transparent)}
 .sos-eyebrow{font-size:9px;font-weight:800;letter-spacing:3.5px;text-transform:uppercase;color:rgba(255,64,96,.6);margin-bottom:20px}
@@ -172,16 +153,12 @@ body{min-height:100%;font-family:'Plus Jakarta Sans',sans-serif;background:var(-
 .sos-desc{font-size:12px;color:var(--sub);line-height:1.7}
 .sos-desc b{color:rgba(255,120,100,.85);font-weight:600}
 .sos-stat{display:flex;align-items:center;gap:6px;background:rgba(61,232,160,.08);border:1px solid rgba(61,232,160,.2);border-radius:20px;padding:5px 12px;font-size:11px;font-weight:700;color:var(--green)}
-
-/* MAP */
 .map-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
 .map-title{font-size:15px;font-weight:700}
 .map-pill{display:flex;align-items:center;gap:5px;background:var(--greeng);border:1px solid rgba(61,232,160,.2);border-radius:20px;padding:5px 12px;font-size:10px;font-weight:700;color:var(--green);letter-spacing:.5px}
 #map{height:220px;border-radius:15px;overflow:hidden;border:1px solid var(--border)}
 .leaflet-tile{filter:brightness(.55) saturate(.45) hue-rotate(210deg)}
 .leaflet-control-attribution{display:none!important}
-
-/* MODAL */
 .backdrop{position:fixed;inset:0;background:rgba(8,6,18,.82);backdrop-filter:blur(10px);z-index:200;display:none;align-items:flex-end;justify-content:center}
 .backdrop.open{display:flex}
 .sheet{background:var(--card);border:1px solid var(--border2);border-radius:28px 28px 0 0;padding:20px 18px 48px;width:100%;max-width:430px;animation:sh .3s cubic-bezier(.22,1,.36,1)}
@@ -192,8 +169,6 @@ body{min-height:100%;font-family:'Plus Jakarta Sans',sans-serif;background:var(-
 .btn-cancel{flex:1;padding:13px;border-radius:13px;border:1.5px solid var(--border2);background:var(--card2);color:var(--sub);font-family:'Plus Jakarta Sans',sans-serif;font-weight:700;font-size:14px;cursor:pointer}
 .btn-confirm{flex:2;padding:13px;border-radius:13px;border:none;background:linear-gradient(135deg,var(--red),var(--red2));color:white;font-family:'Plus Jakarta Sans',sans-serif;font-weight:800;font-size:14px;cursor:pointer;box-shadow:0 4px 20px var(--redg);transition:transform .1s}
 .btn-confirm:active{transform:scale(.97)}
-
-/* TOAST */
 .toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:rgba(14,11,26,.97);backdrop-filter:blur(20px);border:1px solid var(--border2);border-radius:14px;padding:12px 22px;font-size:13px;font-weight:600;white-space:nowrap;display:none;z-index:999;box-shadow:0 8px 36px rgba(0,0,0,.55);animation:tin .22s ease forwards}
 @keyframes tin{from{opacity:0;transform:translateX(-50%) translateY(14px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 @supports(padding-bottom:env(safe-area-inset-bottom)){.wrap{padding-bottom:calc(50px + env(safe-area-inset-bottom))}.sheet{padding-bottom:calc(44px + env(safe-area-inset-bottom))}}
@@ -300,28 +275,24 @@ body{min-height:100%;font-family:'Plus Jakarta Sans',sans-serif;background:var(-
 <div class="toast" id="toast"></div>
 
 <script>
-/* MAP */
 const map=L.map('map',{zoomControl:false,attributionControl:false}).setView([20.5937,78.9629],13);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 const pin=L.divIcon({className:'',html:'<div style="width:18px;height:18px;border-radius:50%;background:linear-gradient(135deg,#ff4060,#ff7a5c);border:3px solid #fff;box-shadow:0 0 0 3px rgba(255,64,96,.4),0 3px 12px rgba(0,0,0,.6)"></div>',iconSize:[18,18],iconAnchor:[9,9]});
 const marker=L.marker([0,0],{icon:pin}).addTo(map);
 
-/* TOAST */
-function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';clearTimeout(t._t);t._t=setTimeout(()=>t.style.display='none',2800)}
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';clearTimeout(t._t);t._t=setTimeout(()=>t.style.display='none',3200)}
 
-/* PROFILE */
 function save(){
   const n=document.getElementById('name').value.trim();
   if(!n){toast('Enter your name first');return}
-  document.cookie='username='+n+'; path=/';
+  document.cookie='username='+encodeURIComponent(n)+'; path=/; max-age=31536000';
   document.getElementById('username').textContent=n;
   document.getElementById('p-av').textContent=n.charAt(0).toUpperCase();
-  toast('Profile saved');
+  toast('✅ Profile saved');
 }
-function getCookie(k){const v=document.cookie.match('(^|;) ?'+k+'=([^;]*)(;|$)');return v?v[2]:null}
+function getCookie(k){const v=document.cookie.match('(^|;) ?'+k+'=([^;]*)(;|$)');return v?decodeURIComponent(v[2]):null}
 (function(){const n=getCookie('username')||'';if(n){document.getElementById('username').textContent=n;document.getElementById('name').value=n;document.getElementById('p-av').textContent=n.charAt(0).toUpperCase()}})();
 
-/* CONTACTS */
 let contacts=[];
 const PALETTE=[
   {bg:'rgba(255,64,96,.18)',border:'rgba(255,64,96,.3)',txt:'#ff4060',strip:'linear-gradient(to bottom,#ff4060,#ff7a5c)'},
@@ -330,22 +301,16 @@ const PALETTE=[
   {bg:'rgba(255,179,71,.15)',border:'rgba(255,179,71,.3)',txt:'#ffb347',strip:'linear-gradient(to bottom,#ffb347,#ffd700)'},
   {bg:'rgba(91,200,255,.15)',border:'rgba(91,200,255,.3)',txt:'#5bc8ff',strip:'linear-gradient(to bottom,#5bc8ff,#3b82f6)'},
 ];
-
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
-
 function loadContacts(){try{contacts=JSON.parse(localStorage.getItem('protractor_contacts')||'[]')}catch{contacts=[]}renderContacts()}
 function saveContacts(){localStorage.setItem('protractor_contacts',JSON.stringify(contacts))}
-
 function renderContacts(){
   const n=contacts.length;
   document.getElementById('c-badge').textContent=n+' contact'+(n!==1?'s':'');
   document.getElementById('cc-chip').textContent=n;
   document.getElementById('sos-count').textContent=n;
   const list=document.getElementById('contact-list');
-  if(!n){
-    list.innerHTML='<div class="no-c"><span class="no-c-ico">🤝</span>No contacts added yet.<br>Add people who should be<br>alerted in an emergency.</div>';
-    return;
-  }
+  if(!n){list.innerHTML='<div class="no-c"><span class="no-c-ico">🤝</span>No contacts added yet.<br>Add people who should be<br>alerted in an emergency.</div>';return}
   list.innerHTML=contacts.map((c,i)=>{
     const p=PALETTE[i%PALETTE.length];
     const init=(c.name||'?').charAt(0).toUpperCase();
@@ -354,18 +319,11 @@ function renderContacts(){
     return `<div class="c-item">
       <div class="c-accent" style="background:${p.strip}"></div>
       <div class="c-av" style="background:${p.bg};border-color:${p.border};color:${p.txt}">${init}</div>
-      <div class="c-body">
-        <div class="c-name">${esc(c.name)}</div>
-        <div class="c-pills">${ph}${em}</div>
-      </div>
-      <button class="c-del" onclick="removeContact(${i})" aria-label="Remove">
-        <span>✕</span>
-        <span class="c-del-lbl">Remove</span>
-      </button>
+      <div class="c-body"><div class="c-name">${esc(c.name)}</div><div class="c-pills">${ph}${em}</div></div>
+      <button class="c-del" onclick="removeContact(${i})" aria-label="Remove"><span>✕</span><span class="c-del-lbl">Remove</span></button>
     </div>`;
   }).join('');
 }
-
 function removeContact(i){const nm=contacts[i].name;contacts.splice(i,1);saveContacts();renderContacts();toast('🗑 '+nm+' removed')}
 function openModal(){document.getElementById('modal').classList.add('open');setTimeout(()=>document.getElementById('m-name').focus(),340)}
 function closeModal(){document.getElementById('modal').classList.remove('open');['m-name','m-phone','m-email'].forEach(id=>document.getElementById(id).value='')}
@@ -379,18 +337,17 @@ function addContact(){
   contacts.push({name:n,phone:p,email:e});saveContacts();renderContacts();closeModal();toast('✓ '+n+' added');
 }
 
-/* LOCATION */
 navigator.geolocation.watchPosition(pos=>{
   fetch('/update_location',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lat:pos.coords.latitude,lng:pos.coords.longitude})});
   marker.setLatLng([pos.coords.latitude,pos.coords.longitude]);map.setView([pos.coords.latitude,pos.coords.longitude],15);
   const s=document.getElementById('gps-status');s.textContent='ON';s.className='chip-v on';
 },()=>{toast('Enable GPS for tracking');const s=document.getElementById('gps-status');s.textContent='OFF';s.className='chip-v off'},{enableHighAccuracy:true});
 
-/* SOS */
 function sendSOS(){
-  if(!contacts.length){toast('\u26a0\ufe0f Add a contact first');return}
-  const uname=document.getElementById('name').value||getCookie('username')||'Unknown';
-  toast('\U0001f6a8 Sending SOS to '+contacts.length+' contact'+(contacts.length>1?'s':'')+'...');
+  if(!contacts.length){toast('⚠️ Add a contact first');return}
+  const uname=document.getElementById('name').value.trim()||getCookie('username')||'Unknown';
+  if(uname==='Unknown'){toast('⚠️ Please save your name first');return}
+  toast('🚨 Sending SOS to '+contacts.length+' contact'+(contacts.length>1?'s':'')+'...');
   let done=0,ok=0,fail=0;
   contacts.forEach(c=>{
     fetch('/sos',{
@@ -401,21 +358,18 @@ function sendSOS(){
     .then(r=>r.json())
     .then(d=>{
       done++;
-      if(d.status&&(d.status.includes('\u2705')||d.status.toLowerCase().includes('sent'))){ok++}
-      else{fail++;toast('\u274c '+c.name+': '+(d.status||'Unknown error'))}
+      if(d.status&&d.status.includes('✅')){ok++}
+      else{fail++;console.error(c.name+':',d.status,d.trace||'');toast('❌ '+c.name+': '+(d.status||'Unknown error'))}
       if(done===contacts.length){
-        if(ok>0&&fail===0) toast('\u2705 SOS sent to all '+ok+' contact'+(ok>1?'s':'')+'!');
-        else if(ok>0) toast('\u26a0\ufe0f Sent to '+ok+', failed '+fail);
+        if(ok>0&&fail===0)toast('✅ SOS sent to all '+ok+' contact'+(ok>1?'s':'')+'!');
+        else if(ok>0)toast('⚠️ Sent to '+ok+', failed '+fail);
+        else toast('❌ All sends failed. Check Render logs.');
       }
     })
-    .catch(err=>{
-      done++;fail++;
-      toast('\u274c Network error: '+err.message);
-    });
+    .catch(err=>{done++;fail++;toast('❌ Network error: '+err.message)});
   });
 }
 
-/* VOICE */
 const keywords=["help","save me","stop","danger"];
 function autoCall(){const f=contacts.find(c=>c.phone);if(f)window.location.href='tel:'+f.phone}
 function triggerAutoSOS(){toast('Keyword detected! SOS firing...');sendSOS();autoCall()}
@@ -427,7 +381,6 @@ function startVoice(){
   r.onerror=()=>{};r.onend=()=>r.start();r.start();
   const v=document.getElementById('voice-status');v.textContent='ON';v.className='chip-v on';
 }
-
 loadContacts();
 setTimeout(startVoice,2000);
 </script>
@@ -435,7 +388,9 @@ setTimeout(startVoice,2000);
 </html>"""
 
 
-# ---------------- ROUTES ----------------
+# ============================================================
+#  ROUTES
+# ============================================================
 @app.route("/")
 def home():
     return render_template_string(HTML)
@@ -443,8 +398,8 @@ def home():
 @app.route("/update_location", methods=["POST"])
 def update_location():
     data = request.json
-    live_location["lat"] = data["lat"]
-    live_location["lng"] = data["lng"]
+    live_location["lat"] = data.get("lat")
+    live_location["lng"] = data.get("lng")
     return jsonify({"status": "updated"})
 
 @app.route("/sos", methods=["POST"])
@@ -453,164 +408,127 @@ def sos():
         data = request.json
         lat  = live_location.get("lat")
         lng  = live_location.get("lng")
+
         if not lat or not lng:
-            return jsonify({"status": "❌ Location not available yet. Please allow GPS and wait a moment."})
+            return jsonify({"status": "❌ Location not available yet. Please allow GPS and wait a few seconds, then try again."})
+
         map_url = f"https://www.google.com/maps?q={lat},{lng}"
         errors  = []
 
-        # ── SMS via Twilio ──────────────────────────────────────────────────
+        # ── SMS via Twilio ──────────────────────────────────────────
         if data.get("phone"):
             try:
                 if not twilio_client:
-                    raise Exception("Twilio client failed to initialise — check TWILIO_SID / TWILIO_AUTH env vars.")
-                sms_msg = (
-                    f"\U0001f6a8 SOS ALERT \u2014 PROTRACTOR\n"
-                    f"\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n"
-                    f"\U0001f464 Person  : {data['name']}\n"
-                    f"\U0001f4cd Coords  : {lat:.5f}, {lng:.5f}\n"
-                    f"\U0001f5fa  Maps   : {map_url}\n"
-                    f"\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n"
-                    f"\u26a0\ufe0f  This person needs IMMEDIATE help.\n"
-                    f"\U0001f4de  Call them or dial 112 now."
+                    raise Exception("Twilio not initialised. Check TWILIO_SID and TWILIO_AUTH env vars.")
+                sms_body = (
+                    f"🚨 SOS ALERT — PROTRACTOR\n"
+                    f"────────────────────────\n"
+                    f"👤 Person : {data['name']}\n"
+                    f"📍 Coords : {lat:.5f}, {lng:.5f}\n"
+                    f"🗺 Maps   : {map_url}\n"
+                    f"────────────────────────\n"
+                    f"⚠️ This person needs IMMEDIATE help.\n"
+                    f"📞 Call them or dial 112 now."
                 )
                 twilio_client.messages.create(
-                    body=sms_msg,
+                    body=sms_body,
                     from_=TWILIO_NUMBER,
                     to=data["phone"]
                 )
             except Exception as e:
                 errors.append(f"SMS: {e}")
 
-        # ── Email via SendGrid HTTP API (works on Render free tier) ─────────
+        # ── Email via Gmail STARTTLS port 587 ───────────────────────
         if data.get("email"):
             try:
                 html_body = f"""<!DOCTYPE html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>SOS Alert</title>
-</head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>SOS Alert</title></head>
 <body style="margin:0;padding:0;background:#f0ebe2;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0ebe2;padding:32px 0;">
     <tr><td align="center">
       <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;">
-        <tr><td style="height:5px;background:linear-gradient(90deg,#c8392b,#e85444 50%,#c9933a);border-radius:8px 8px 0 0;"></td></tr>
-        <tr>
-          <td style="background:#1a1612;padding:28px 32px 22px;">
-            <table width="100%" cellpadding="0" cellspacing="0" border="0">
-              <tr>
-                <td>
-                  <div style="font-size:22px;font-weight:900;color:#f5f0e8;letter-spacing:-.5px;">Protractor<span style="color:#c8392b;">.</span></div>
-                  <div style="font-size:10px;letter-spacing:3px;text-transform:uppercase;color:#8a8070;margin-top:3px;">Personal Safety Guard</div>
+        <tr><td style="height:5px;background:#c8392b;border-radius:8px 8px 0 0;"></td></tr>
+        <tr><td style="background:#1a1612;padding:28px 32px 22px;">
+          <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+            <td><div style="font-size:22px;font-weight:900;color:#f5f0e8;">Protractor<span style="color:#c8392b;">.</span></div>
+                <div style="font-size:10px;letter-spacing:3px;text-transform:uppercase;color:#8a8070;margin-top:3px;">Personal Safety Guard</div></td>
+            <td align="right"><div style="background:#c8392b;border-radius:50%;width:44px;height:44px;text-align:center;line-height:44px;font-size:22px;">&#128737;</div></td>
+          </tr></table>
+        </td></tr>
+        <tr><td style="background:#c8392b;padding:20px 32px;">
+          <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+            <td><div style="font-size:11px;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,.65);margin-bottom:6px;">Emergency Alert</div>
+                <div style="font-size:26px;font-weight:900;color:#fff;line-height:1.1;">&#128680; SOS Triggered</div></td>
+            <td align="right" style="vertical-align:top;"><div style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);border-radius:20px;padding:5px 12px;font-size:11px;font-weight:600;color:white;white-space:nowrap;">URGENT</div></td>
+          </tr></table>
+        </td></tr>
+        <tr><td style="background:#ffffff;padding:28px 32px;">
+          <p style="margin:0 0 20px;font-size:14px;color:#5a5248;line-height:1.7;">
+            <strong style="color:#1a1612;">{data['name']}</strong> has triggered an emergency SOS alert via Protractor. Please respond immediately or contact emergency services.
+          </p>
+          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:20px;">
+            <tr><td style="padding-bottom:10px;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#fdecea;border:1px solid #f0c4bf;border-radius:12px;padding:14px 16px;"><tr>
+                <td style="font-size:18px;width:36px;vertical-align:middle;">&#128100;</td>
+                <td style="padding-left:10px;vertical-align:middle;">
+                  <div style="font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:#c8392b;font-weight:600;">Person in distress</div>
+                  <div style="font-size:15px;font-weight:700;color:#1a1612;margin-top:2px;">{data['name']}</div>
                 </td>
-                <td align="right">
-                  <div style="background:#c8392b;border-radius:50%;width:44px;height:44px;text-align:center;line-height:44px;font-size:22px;">&#128737;</div>
+              </tr></table>
+            </td></tr>
+            <tr><td>
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f0e8;border:1px solid #e0d8cc;border-radius:12px;padding:14px 16px;"><tr>
+                <td style="font-size:18px;width:36px;vertical-align:middle;">&#128205;</td>
+                <td style="padding-left:10px;vertical-align:middle;">
+                  <div style="font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:#8a8070;font-weight:600;">GPS Coordinates</div>
+                  <div style="font-size:13px;font-weight:600;color:#1a1612;margin-top:2px;font-family:monospace;">{lat:.6f}, {lng:.6f}</div>
                 </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-        <tr>
-          <td style="background:#c8392b;padding:20px 32px;">
-            <table width="100%" cellpadding="0" cellspacing="0" border="0">
-              <tr>
-                <td>
-                  <div style="font-size:11px;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,.65);margin-bottom:6px;">Emergency Alert</div>
-                  <div style="font-size:26px;font-weight:900;color:#fff;letter-spacing:-.5px;line-height:1.1;">&#128680; SOS Triggered</div>
-                </td>
-                <td align="right" style="vertical-align:top;">
-                  <div style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);border-radius:20px;padding:5px 12px;font-size:11px;font-weight:600;color:white;white-space:nowrap;">URGENT</div>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-        <tr>
-          <td style="background:#ffffff;padding:28px 32px;">
-            <p style="margin:0 0 20px;font-size:14px;color:#5a5248;line-height:1.7;">
-              <strong style="color:#1a1612;">{data['name']}</strong> has triggered an emergency SOS alert via Protractor. Please respond immediately or contact emergency services.
-            </p>
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:20px;">
-              <tr><td style="padding-bottom:10px;">
-                <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#fdecea;border:1px solid #f0c4bf;border-radius:12px;padding:14px 16px;">
-                  <tr>
-                    <td style="font-size:18px;width:36px;vertical-align:middle;">&#128100;</td>
-                    <td style="padding-left:10px;vertical-align:middle;">
-                      <div style="font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:#c8392b;font-weight:600;">Person in distress</div>
-                      <div style="font-size:15px;font-weight:700;color:#1a1612;margin-top:2px;">{data['name']}</div>
-                    </td>
-                  </tr>
-                </table>
-              </td></tr>
-              <tr><td>
-                <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f0e8;border:1px solid #e0d8cc;border-radius:12px;padding:14px 16px;">
-                  <tr>
-                    <td style="font-size:18px;width:36px;vertical-align:middle;">&#128205;</td>
-                    <td style="padding-left:10px;vertical-align:middle;">
-                      <div style="font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:#8a8070;font-weight:600;">GPS Coordinates</div>
-                      <div style="font-size:13px;font-weight:600;color:#1a1612;margin-top:2px;font-family:monospace;">{lat:.6f}, {lng:.6f}</div>
-                    </td>
-                  </tr>
-                </table>
-              </td></tr>
-            </table>
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;">
-              <tr><td align="center">
-                <a href="{map_url}" target="_blank" style="display:inline-block;background:#c8392b;color:#fff;text-decoration:none;font-size:14px;font-weight:700;letter-spacing:.5px;padding:14px 32px;border-radius:12px;box-shadow:0 4px 14px rgba(200,57,43,.35);">
-                  &#128205;&nbsp; Open Live Location on Maps
-                </a>
-              </td></tr>
-            </table>
-            <hr style="border:none;border-top:1px solid #ece6d9;margin:0 0 20px;">
-            <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#8a8070;font-weight:600;margin-bottom:12px;">Recommended Actions</div>
-            <table width="100%" cellpadding="0" cellspacing="0" border="0">
-              <tr><td style="padding-bottom:8px;"><table cellpadding="0" cellspacing="0" border="0"><tr>
-                <td style="width:24px;font-size:14px;vertical-align:top;padding-top:1px;">&#128222;</td>
-                <td style="padding-left:8px;font-size:13px;color:#2e2820;line-height:1.5;">Call <strong>{data['name']}</strong> immediately to check their status</td>
-              </tr></table></td></tr>
-              <tr><td style="padding-bottom:8px;"><table cellpadding="0" cellspacing="0" border="0"><tr>
-                <td style="width:24px;font-size:14px;vertical-align:top;padding-top:1px;">&#128506;</td>
-                <td style="padding-left:8px;font-size:13px;color:#2e2820;line-height:1.5;">Use the location link above to find their exact position</td>
-              </tr></table></td></tr>
-              <tr><td><table cellpadding="0" cellspacing="0" border="0"><tr>
-                <td style="width:24px;font-size:14px;vertical-align:top;padding-top:1px;">&#128659;</td>
-                <td style="padding-left:8px;font-size:13px;color:#2e2820;line-height:1.5;">Contact emergency services (112) if unreachable</td>
-              </tr></table></td></tr>
-            </table>
-          </td>
-        </tr>
-        <tr>
-          <td style="background:#1a1612;padding:18px 32px;border-radius:0 0 8px 8px;">
-            <table width="100%" cellpadding="0" cellspacing="0" border="0">
-              <tr>
-                <td>
-                  <div style="font-size:12px;color:#8a8070;">Sent by <strong style="color:#f5f0e8;">Protractor</strong> safety app</div>
-                  <div style="font-size:11px;color:#5a5248;margin-top:3px;">Automated emergency alert — do not ignore.</div>
-                </td>
-                <td align="right"><div style="font-size:20px;">&#128737;</div></td>
-              </tr>
-            </table>
-          </td>
-        </tr>
+              </tr></table>
+            </td></tr>
+          </table>
+          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;">
+            <tr><td align="center">
+              <a href="{map_url}" target="_blank" style="display:inline-block;background:#c8392b;color:#fff;text-decoration:none;font-size:14px;font-weight:700;padding:14px 32px;border-radius:12px;">
+                &#128205;&nbsp; Open Live Location on Maps
+              </a>
+            </td></tr>
+          </table>
+          <hr style="border:none;border-top:1px solid #ece6d9;margin:0 0 20px;">
+          <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#8a8070;font-weight:600;margin-bottom:12px;">Recommended Actions</div>
+          <table width="100%" cellpadding="0" cellspacing="0" border="0">
+            <tr><td style="padding-bottom:8px;font-size:13px;color:#2e2820;line-height:1.5;">&#128222; Call <strong>{data['name']}</strong> immediately to check their status</td></tr>
+            <tr><td style="padding-bottom:8px;font-size:13px;color:#2e2820;line-height:1.5;">&#128506; Use the location link above to find their exact position</td></tr>
+            <tr><td style="font-size:13px;color:#2e2820;line-height:1.5;">&#128659; Contact emergency services (112) if unreachable</td></tr>
+          </table>
+        </td></tr>
+        <tr><td style="background:#1a1612;padding:18px 32px;border-radius:0 0 8px 8px;">
+          <div style="font-size:12px;color:#8a8070;">Sent by <strong style="color:#f5f0e8;">Protractor</strong> safety app &nbsp;|&nbsp; Automated alert — do not ignore.</div>
+        </td></tr>
         <tr><td style="height:4px;background:#c8392b;border-radius:0 0 8px 8px;"></td></tr>
       </table>
     </td></tr>
   </table>
-</body>
-</html>"""
-                plain_body = f"SOS ALERT!\nUser: {data['name']}\nLocation: {map_url}"
-                subject    = f"\U0001f6a8 SOS Alert \u2014 {data['name']} needs help NOW"
-                send_email_sendgrid(data["email"], subject, html_body, plain_body)
+</body></html>"""
+                plain_body = (
+                    f"SOS ALERT from Protractor!\n"
+                    f"Person: {data['name']}\n"
+                    f"Location: {map_url}\n"
+                    f"Coords: {lat:.6f}, {lng:.6f}\n\n"
+                    f"This person needs immediate help. Call them or dial 112."
+                )
+                subject = f"🚨 SOS Alert — {data['name']} needs help NOW"
+                send_email_gmail(data["email"], subject, html_body, plain_body)
             except Exception as e:
                 errors.append(f"Email: {e}")
 
         if errors:
-            return jsonify({"status": f"\u274c Error: {'; '.join(errors)}"})
-        return jsonify({"status": "\u2705 SOS sent successfully!"})
+            return jsonify({"status": f"❌ Error: {'; '.join(errors)}"})
+        return jsonify({"status": "✅ SOS sent successfully!"})
+
     except Exception as e:
         import traceback
-        return jsonify({"status": f"\u274c Server error: {str(e)}", "trace": traceback.format_exc()})
+        return jsonify({"status": f"❌ Server error: {str(e)}", "trace": traceback.format_exc()})
 
 
 @app.route("/manifest.json")
@@ -625,7 +543,10 @@ def manifest():
         ]
     })
 
-# ---------------- START ----------------
+
+# ============================================================
+#  START
+# ============================================================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
