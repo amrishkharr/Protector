@@ -36,6 +36,8 @@ app = Flask(__name__)
 #SMTP_USER = "protectorhelp.app@gmail.com"
 #SMTP_PASS = "qfjd lbnz chgu lxdg"
 
+
+
 # --- Twilio ---
 TWILIO_SID    = os.environ.get("TWILIO_SID")
 TWILIO_AUTH   = os.environ.get("TWILIO_AUTH")
@@ -47,10 +49,6 @@ SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
 SMTP_USER = os.environ.get("SMTP_USER")
 SMTP_PASS = os.environ.get("SMTP_PASS")
 
-try:
-    twilio_client = Client(TWILIO_SID, TWILIO_AUTH) if TWILIO_SID and TWILIO_AUTH else None
-except Exception:
-    twilio_client = None
 
 
 try:
@@ -71,7 +69,7 @@ def send_email_smtp(to_email, subject, html_body, plain_body):
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"]    = f"Protector SOS <{SMTP_USER}>"
+    msg["From"]    = f"Protractor SOS <{SMTP_USER}>"
     msg["To"]      = to_email
 
     msg.attach(MIMEText(plain_body, "plain"))
@@ -91,7 +89,7 @@ def send_email_smtp(to_email, subject, html_body, plain_body):
 HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
-<title>Protector</title>
+<title>Protractor</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <meta name="theme-color" content="#0e0b1a">
 <link rel="manifest" href="/manifest.json">
@@ -214,14 +212,9 @@ body{min-height:100%;font-family:'Plus Jakarta Sans',sans-serif;background:var(-
 
   <div class="header">
     <div class="hb">
-      <div class="logo"><svg width="26" height="26" viewBox="0 0 26 26" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <path d="M13 2L22 6.5V13C22 18 17.5 22.5 13 24C8.5 22.5 4 18 4 13V6.5Z" stroke="white" stroke-width="1.8" stroke-linejoin="round" fill="rgba(255,255,255,0.12)"/>
-  <rect x="9.5" y="12" width="7" height="6" rx="1.5" fill="white"/>
-  <path d="M10.5 12V9.5C10.5 8.1 11.3 7 13 7C14.7 7 15.5 8.1 15.5 9.5V12" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
-  <circle cx="13" cy="15.2" r="1.2" fill="#ff4060"/>
-</svg></div>
+      <div class="logo">&#128272;</div>
       <div>
-        <div class="appname">Protector</div>
+        <div class="appname">Protractor</div>
         <div class="subline">Personal Safety Guard</div>
       </div>
     </div>
@@ -586,7 +579,7 @@ def sos():
                 if not twilio_client:
                     raise Exception("Twilio client failed to initialise. Check SID and AUTH token.")
                 sms_body = (
-                    f"SOS ALERT - Protector\n"
+                    f"SOS ALERT - PROTRACTOR\n"
                     f"Person: {data['name']}\n"
                     f"Location: {map_url}\n"
                     f"Coords: {lat:.5f}, {lng:.5f}\n"
@@ -611,7 +604,7 @@ def sos():
       <table width="100%" style="max-width:520px;">
         <tr><td style="height:5px;background:#c8392b;border-radius:8px 8px 0 0;"></td></tr>
         <tr><td style="background:#1a1612;padding:24px 32px;">
-          <div style="font-size:22px;font-weight:900;color:#f5f0e8;">Protector<span style="color:#c8392b;">.</span></div>
+          <div style="font-size:22px;font-weight:900;color:#f5f0e8;">Protractor<span style="color:#c8392b;">.</span></div>
           <div style="font-size:10px;letter-spacing:3px;color:#8a8070;margin-top:3px;">PERSONAL SAFETY GUARD</div>
         </td></tr>
         <tr><td style="background:#c8392b;padding:20px 32px;">
@@ -645,14 +638,14 @@ def sos():
           </div>
         </td></tr>
         <tr><td style="background:#1a1612;padding:16px 32px;border-radius:0 0 8px 8px;">
-          <div style="font-size:12px;color:#8a8070;">Sent by <strong style="color:#f5f0e8;">Protector</strong> — do not ignore this alert.</div>
+          <div style="font-size:12px;color:#8a8070;">Sent by <strong style="color:#f5f0e8;">Protractor</strong> — do not ignore this alert.</div>
         </td></tr>
       </table>
     </td></tr>
   </table>
 </body></html>"""
                 plain_body = (
-                    f"SOS ALERT from Protector!\n"
+                    f"SOS ALERT from Protractor!\n"
                     f"Person: {data['name']}\n"
                     f"Location: {map_url}\n"
                     f"Coords: {lat:.6f}, {lng:.6f}\n\n"
@@ -675,7 +668,7 @@ def sos():
 @app.route("/manifest.json")
 def manifest():
     return jsonify({
-        "name": "Protector", "short_name": "Protector",
+        "name": "Protractor", "short_name": "Protractor",
         "start_url": "/", "display": "standalone",
         "background_color": "#0e0b1a", "theme_color": "#ff4060",
         "icons": [
